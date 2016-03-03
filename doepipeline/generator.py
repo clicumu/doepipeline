@@ -1,38 +1,25 @@
 import yaml
-import abc
 import re
 
-
-class BaseClient:
-
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractmethod
-    def connect(self, *args):
-        pass
-
-    @abc.abstractmethod
-    def disconnect(self, *args):
-        pass
-
-    @abc.abstractmethod
-    def execute_command(self, **args):
-        pass
+from doepipeline.utils import parse_job_to_template_string
 
 
-class PipelineRunner:
+class PipelineGenerator:
 
-    def __init__(self, config, client):
+    """
+    Generator class for pipelines.
+
+    Given config the :class:`PipelineGenerator` produces template
+    scripts. When given an experimental design the scripts are
+    rendered into ready-to-run script strings.
+    """
+
+    def __init__(self, config):
         try:
             self._validate_config(config)
         except AssertionError:
             raise ValueError('Invalid config')
 
-        if not isinstance(client, BaseClient):
-            msg = 'client must be derived from BaseClient, not: {}'
-            raise ValueError(msg.format(type(client)))
-
-        self._client = client
         self._config = config
         self._current_iteration = 0
 
@@ -49,10 +36,17 @@ class PipelineRunner:
         self._factors = {key: factor['factor_name'] for job in jobs
                          for key, factor in job['factors'].items()}
 
-
     @classmethod
-    def from_yaml(cls, path, *args, **kwargs):
-        config = yaml.load(open(path))
+    def from_yaml(cls, yaml_config, *args, **kwargs):
+        if isinstance(yaml_config, str):
+            with open(yaml_config) as f:
+                config = yaml.load(f)
+        else:
+            try:
+                config = yaml.load(yaml_config)
+            except AttributeError:
+                raise ValueError('yaml_config must be path or file-handle')
+
         return cls(config, *args, **kwargs)
 
     def new_pipeline_collection(self, experiment_design):
@@ -78,7 +72,7 @@ class PipelineRunner:
         pipeline_collection = dict()
 
         for _, experiment in experiment_design.iterrows():
-            exp_no = experiment['Exp No']
+            exp_no = int(experiment['Exp No'])
             rendered_scripts = list()
 
             for script in self._scripts_templates:
@@ -140,31 +134,5 @@ class PipelineRunner:
             assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script'])\
                        for fac, fac_d in job['factors'].items() if fac_d.get('substitute', False))
 
-        assert all(key in valid_before for key in config_dict['before_run'])
-
-
-def parse_job_to_template_string(job):
-    """ Parse config job-entry into template string.
-
-    :param job: Config entry for job.
-    :type job: dict
-    :return: Parsed string
-    :rtype: str
-    """
-    script = job['script'].strip()
-
-    try:
-        factors = job['factors']
-    except KeyError:
-        # Script with no additional factors
-        pass
-    else:
-        for key, factor in factors.items():
-            if factor.get('script_option', False):
-                option_ = factor['script_option']
-                script += ' %s {%s}' % (option_, key)
-            if factor.get('substitute', False):
-                template_pattern = r'{%\s*' + key + r'\s*%}'
-                script = re.sub(template_pattern, '{' + key + '}', script)
-
-    return script
+        if 'before_run' in config_dict:
+            assert all(key in valid_before for key in config_dict['before_run'])

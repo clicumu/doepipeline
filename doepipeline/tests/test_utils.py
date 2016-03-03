@@ -1,5 +1,5 @@
 import unittest
-from doepipeline import *
+from doepipeline.utils import parse_job_to_template_string
 
 
 class TestJobParse(unittest.TestCase):
@@ -56,13 +56,6 @@ class TestJobParse(unittest.TestCase):
         parsed_job = parse_job_to_template_string(job)
 
         self.assertEqual(parsed_job, './script --opt {Factor}')
-
-
-class TestPipelineRunner(unittest.TestCase):
-
-    def setUp(self):
-        self.yaml = 'test_pipeline.yaml'
-
 
 
 if __name__ == '__main__':
