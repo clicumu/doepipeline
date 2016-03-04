@@ -38,10 +38,9 @@ class BasePipelineExecutor:
     JOB_RUNNING = 'job_running'
     JOB_FAILED = 'job_failed'
 
-    def __init__(self, workdir=None, max_jobs=None, run_in_batch=False,
+    def __init__(self, workdir=None, run_in_batch=False,
                  poll_interval=10):
         self.workdir = workdir if workdir is not None else '.'
-        self.max_jobs = max_jobs if max_jobs is not None else float('inf')
         self.run_in_batch = run_in_batch
         self.poll_interval = poll_interval
         self.running_jobs = dict()
@@ -97,6 +96,54 @@ class BasePipelineExecutor:
             log.info('Run jobs in parallel using screens')
             self.run_in_screens(job_steps, experiment_index)
 
+    def run_batches(self, job_steps, experiment_index):
+        """ Run the collection of jobs in parallel using batch execution.
+
+        Example job_steps:
+        >>> job_steps = [
+        ...     ['./script_1 --opt1 factor1_1', './script_1 --opt1 factor1_2'],
+        ...     ['./script_2 --opt2 factor2_1', './script_2 --opt2 factor2_2']
+        ... ]
+
+        Given above example, the following batch-scripts will be run::
+
+            cd [exp_name1] && nohup ./script_1 --opt1 factor1_1 > [exp_name1]_step_1.log 2>&1 && cd .. &
+            cd [exp_name2] && nohup ./script_1 --opt1 factor1_2 > [exp_name2]_step_1.log 2>&1 && cd .. &
+            wait
+
+        And when finished::
+
+            cd [exp_name1] && nohup ./script_2 --opt2 factor2_1 > [exp_name1]_step_2.log 2>&1 && cd .. &
+            cd [exp_name2] && nohup ./script_2 --opt2 factor2_2 > [exp_name2]_step_2.log 2>&1 && cd .. &
+            wait
+
+        :param job_steps: List of step-wise scripts.
+        :type job_steps: list[list]
+        :param experiment_index: List of job-names.
+        :type experiment_index: list[str]
+        """
+        base_cmd= 'cd {job_dir} && nohup {script} > {logfile} 2>&1 && cd .. &'
+        base_logname = '{name}_step_{i}.log'
+
+        for i, step in enumerate(job_steps, start=1):
+            commands = list()
+            for script, job_name in zip(step, experiment_index):
+                # Prepare log and command.
+                log_file = base_logname.format(name=job_name, i=i)
+                command = base_cmd.format(job_dir=job_name,
+                                          script=script,
+                                          logfile=log_file)
+                commands.append(command)
+
+            commands.append('wait')
+            batch_command = ' '.join(commands)
+            self.execute_command(batch_command)
+
+            try:
+                self._wait_until_current_jobs_are_finished()
+            except PipelineRunFailed:
+                raise
+
     def run_in_screens(self, job_steps, experiment_index):
         """ Run the collection of jobs in parallel using screens.
 
@@ -112,6 +159,7 @@ class BasePipelineExecutor:
         :type experiment_index: list[str]
         """
         base_command = 'nohup {script} > {logfile} 2>&1 &\n echo $!'
+        base_logname = '{name}_step_{i}.log'
 
         for job_name in experiment_index:
             log.debug('Setting up screen: {}'.format(job_name))
@@ -124,7 +172,7 @@ class BasePipelineExecutor:
         for i, step in enumerate(job_steps, start=1):
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
-                log_file = '{name}_step_{i}.log'.format(name=job_name, i=i)
+                log_file = base_logname.format(name=job_name, i=i)
                 command = base_command.format(script=script, logfile=log_file)
 
                 # Execute script in screen.
@@ -134,17 +182,10 @@ class BasePipelineExecutor:
                     self.execute_command(command)
                     self.running_jobs[job_name] = command
 
-            # Monitor job status.
-            while 'running':
-                status, msg = self.poll_jobs()
-                if status == BasePipelineExecutor.JOB_FINISHED:
-                    self.running_jobs = dict()
-                    break
-                elif status == BasePipelineExecutor.JOB_RUNNING:
-                    time.sleep(self.poll_interval)
-                else:
-                    self.running_jobs = dict()
-                    raise PipelineRunFailed(msg)
+            try:
+                self._wait_until_current_jobs_are_finished()
+            except PipelineRunFailed:
+                raise
 
     @contextmanager
     def screen(self, screen_name):
@@ -157,6 +198,19 @@ class BasePipelineExecutor:
             yield
         finally:
             self._disconnect_current_screen()
+
+    def _wait_until_current_jobs_are_finished(self):
+        # Monitor job status.
+        while 'running':
+            status, msg = self.poll_jobs()
+            if status == BasePipelineExecutor.JOB_FINISHED:
+                self.running_jobs = dict()
+                break
+            elif status == BasePipelineExecutor.JOB_RUNNING:
+                time.sleep(self.poll_interval)
+            else:
+                self.running_jobs = dict()
+                raise PipelineRunFailed(msg)
 
     def _disconnect_current_screen(self):
         self.execute_command('screen -d')
