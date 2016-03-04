@@ -56,7 +56,3 @@ class TestJobParse(unittest.TestCase):
         parsed_job = parse_job_to_template_string(job)
 
         self.assertEqual(parsed_job, './script --opt {Factor}')
-
-
-if __name__ == '__main__':
-    unittest.main()
