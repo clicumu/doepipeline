@@ -49,30 +49,36 @@ class PipelineGenerator:
 
         return cls(config, *args, **kwargs)
 
-    def new_pipeline_collection(self, experiment_design):
+    def new_pipeline_collection(self, experiment_design, exp_id_column=None):
         """ Given experiment, create script-strings to execute.
 
         Parameter settings from experimental design are used to
         render template script strings. Results are are returned
-        in a dict with experiment number as key and list containing
+        in a dict with experiment indexes as key and list containing
         pipeline strings.
 
         Example output:
         pipeline_collection = {
-            1: ['./script_one --param 1', './script_two --other-param 3'],
-            2: ['./script_one --param 2', './script_two --other-param 4'],
+            '0': ['./script_one --param 1', './script_two --other-param 3'],
+            '1': ['./script_one --param 2', './script_two --other-param 4'],
             ...
         }
 
         :param experiment_design: Experimental design.
         :type experiment_design: pandas.DataFrame
+        :param exp_id_column: Column of experimental identifiers.
+        :type exp_id_column: str | None
         :return: Dictionary containing rendered script strings.
         :rtype: dict
         """
         pipeline_collection = dict()
 
-        for _, experiment in experiment_design.iterrows():
-            exp_no = int(experiment['Exp No'])
+        for i, experiment in experiment_design.iterrows():
+            if exp_id_column is not None:
+                exp_id = str(experiment[exp_id_column])
+            else:
+                exp_id = str(i)
+
             rendered_scripts = list()
 
             for script in self._scripts_templates:
@@ -88,7 +94,7 @@ class PipelineGenerator:
 
                 rendered_scripts.append(script)
 
-            pipeline_collection[exp_no] = rendered_scripts
+            pipeline_collection[exp_id] = rendered_scripts
 
         return pipeline_collection
 

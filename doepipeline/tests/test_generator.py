@@ -41,11 +41,11 @@ class TestPipelineRunner(unittest.TestCase):
         f.close()
 
         values = [
-            [1, .1, .2],
-            [2, .3, .4]
+            ['A', .1, .2],
+            ['B', .3, .4]
         ]
         self.design = pd.DataFrame(
-                values, columns=['Exp No', 'Factor A', 'Factor B']
+                values, columns=['Exp Id', 'Factor A', 'Factor B']
         )
 
     def tearDown(self):
@@ -71,9 +71,9 @@ class TestPipelineRunner(unittest.TestCase):
         runner = PipelineGenerator(self.config)
 
         pipeline_collection = runner.new_pipeline_collection(self.design)
-
         scripts1 = ['./script_a --option 0.1', './script_b 0.2']
         scripts2 = ['./script_a --option 0.3', './script_b 0.4']
-        self.assertListEqual(pipeline_collection[1], scripts1)
-        self.assertListEqual(pipeline_collection[2], scripts2)
+        self.assertDictEqual({'0': scripts1, '1': scripts2}, pipeline_collection)
 
+        new_collection = runner.new_pipeline_collection(self.design, 'Exp Id')
+        self.assertDictEqual({'A': scripts1, 'B': scripts2}, new_collection)
