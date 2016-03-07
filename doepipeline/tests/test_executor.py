@@ -29,7 +29,7 @@ class MockExecutor(BasePipelineExecutor):
         self.scripts.append(command)
 
     def poll_jobs(self):
-        return self.JOB_FINISHED
+        return self.JOB_FINISHED, ''
 
 
 class ExecutorTestCase(unittest.TestCase):
@@ -66,7 +66,7 @@ class ExecutorTestCase(unittest.TestCase):
         self.pipeline = self.generator.new_pipeline_collection(self.design,'Exp Id')
 
 
-class TestBaseExecutor(ExecutorTestCase):
+class TestBaseExecutorSetup(ExecutorTestCase):
 
     def test_creation_doesnt_crash(self):
         executor = MockExecutor()
@@ -86,12 +86,20 @@ class TestBaseExecutor(ExecutorTestCase):
             ('poll_interval', True)
         ]
         for input in bad_input:
-            try:
-                self.assertRaises(AssertionError,
-                                  lambda: MockExecutor(**dict([input])))
-            except AssertionError, error:
-                error.args += ('input {}'.format(input), )
-                raise
+            self.assertRaises(AssertionError, MockExecutor, **dict([input]))
+
+    def test_invalid_base_script_raises_ValueError(self):
+        self.assertRaises(ValueError, MockExecutor,
+                          base_command='{script}_{bad}')
+        self.assertRaises(ValueError, MockExecutor,
+                          base_command='no_script_{logfile}')
+        self.assertRaises(ValueError, MockExecutor, base_command='no_script')
+
+    def test_invalid_base_log_raises_ValueError(self):
+        self.assertRaises(ValueError, MockExecutor, base_log='{bad_tag}_{i}')
+        self.assertRaises(ValueError, MockExecutor, base_log='{name}_{bad_tag}')
+        self.assertRaises(ValueError, MockExecutor, base_log='{name}_no_i')
+        self.assertRaises(ValueError, MockExecutor, base_log='{i}_no_name')
 
     def test_run_pipeline_sets_up_properly(self):
 
@@ -158,16 +166,80 @@ class TestBaseExecutor(ExecutorTestCase):
         ]
         self.assertListEqual(expected_steps, output['steps'])
 
-    def test_job_run_in_screens(self):
-        executor = MockExecutor(run_in_batch=False)
 
+
+class TestBaseExecutorRunsScreens(ExecutorTestCase):
+
+    def make_expected_scripts(self, workdir, base_script, executor, use_log=False):
+        job1, job2 = self.design['Exp Id'].tolist()
+
+        # Run-setup.
+        expected_scripts = [
+            'cd {}'.format(workdir),
+            'mkdir {}'.format(job1),
+            'mkdir {}'.format(job2)
+        ]
+        # Set-up screens
+        for job in (job1, job2):
+            expected_scripts += [
+                'screen -S {}'.format(job),
+                'screen -d',
+                'screen -r {}'.format(job),
+                'cd {}'.format(job),
+                'screen -d'
+            ]
+
+        # Screen script runs.
+        for step in range(2):
+            for job, i in zip((job1, job2), (1, 2)):
+                expected_scripts += ['screen -r {}'.format(job)]
+
+                if use_log:
+                    log_file = executor.base_log.format(name=job, i=step + 1)
+                    expected_scripts += ['touch {}'.format(log_file)]
+                    script = base_script.format(script=self.pipeline[job][step],
+                                                logfile=log_file)
+                else:
+                    script = base_script.format(script=self.pipeline[job][step])
+
+                script += ' &'
+                expected_scripts += [
+                    script,
+                    'screen -d'
+                ]
+        return expected_scripts
+
+    def test_run_jobs_without_logs_give_correct_output(self):
+        base_cmd = '{script}'
+        executor = MockExecutor(run_in_batch=False, base_command=base_cmd)
         executor.run_pipeline_collection(self.pipeline)
+        expected_scripts = self.make_expected_scripts('.', base_cmd,
+                                                      executor, False)
+        self.assertListEqual(expected_scripts, executor.scripts)
+
+    def test_run_jobs_with_logs_give_corrext_output(self):
+        base_cmd = '{script}_{logfile}'
+        executor = MockExecutor(run_in_batch=False,
+                                base_command=base_cmd)
+        executor.run_pipeline_collection(self.pipeline)
+        expected_scripts = self.make_expected_scripts('.', base_cmd,
+                                                      executor, True)
+        self.assertListEqual(expected_scripts, executor.scripts)
+
+
+class TestBaseExecutorRunsBatches(ExecutorTestCase):
+
+    def test_job_run_in_batch(self):
+        executor = MockExecutor(base_command='{script}')
+        executor.run_pipeline_collection(self.pipeline)
+        job1, job2 = self.design['Exp Id'].tolist()
 
         # Run-setup.
         expected_scripts = [
             'cd {}'.format(executor.workdir),
-            'mkdir {}'.format(self.design['Exp Id'][0]),
-            'mkdir {}'.format(self.design['Exp Id'][1])
+            'mkdir {}'.format(job1),
+            'mkdir {}'.format(job2)
         ]
-
-
+        for step in range(2):
+            for job, i in zip((job1, job2), (1, 2)):
+                pass

@@ -148,16 +148,30 @@ class BasePipelineExecutor:
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
         """
-        base_cmd= 'cd {job_dir} && ' + self.base_command + ' && cd .. &'
+        if self.base_command.endswith(' &'):
+            base = self.base_command[:-2]
+        else:
+            base = self.base_command
+
+        base_command= 'cd {job_dir} && {log_script}' + base + ' && cd .. &'
 
         for i, step in enumerate(job_steps, start=1):
             commands = list()
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
                 log_file = self.base_log.format(name=job_name, i=i)
-                command = base_cmd.format(job_dir=job_name,
-                                          script=script,
-                                          logfile=log_file)
+                command = base_command.format(job_dir=job_name,
+                                              script=script)
+
+                # Optional script formatting.
+                try:
+                    command = command.format(logfile=log_file)
+                except KeyError:
+                    command = command.format(log_script='')
+                else:
+                    log_script = 'touch {logfile} && '.format(logfile=log_file)
+                    command = command.format(log_script=log_script)
+
                 commands.append(command)
 
             commands.append('wait')
@@ -183,7 +197,9 @@ class BasePipelineExecutor:
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
         """
-        base_command = self.base_command + ' &\n echo $!'
+        base_command = self.base_command
+        if not self.base_command.endswith('&'):
+            base_command += ' &'
 
         for job_name in experiment_index:
             log.debug('Setting up screen: {}'.format(job_name))
@@ -197,11 +213,20 @@ class BasePipelineExecutor:
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
                 log_file = self.base_log.format(name=job_name, i=i)
-                command = base_command.format(script=script, logfile=log_file)
+
+                try:
+                    command = base_command.format(script=script)
+                except KeyError:
+                    has_log = True
+                    command = base_command.format(script=script,
+                                                  logfile=log_file)
+                else:
+                    has_log = False
 
                 # Execute script in screen.
                 with self.screen(job_name):
-                    self.execute_command('touch {log}'.format(log=log_file))
+                    if has_log:
+                        self.execute_command('touch {log}'.format(log=log_file))
                     log.debug('Executes: {}'.format(command))
                     self.execute_command(command)
                     self.running_jobs[job_name] = command
