@@ -13,7 +13,10 @@ Exceptions:
 import abc
 import logging
 import time
+import subprocess
 from contextlib import contextmanager
+
+from doepipeline import utils
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +42,30 @@ class BasePipelineExecutor:
     JOB_FAILED = 'job_failed'
 
     def __init__(self, workdir=None, run_in_batch=False,
-                 poll_interval=10):
+                 poll_interval=10, base_command=None, base_log=None):
+        assert workdir is None or isinstance(workdir, str) and workdir.strip(),\
+            'path must be None or string'
+        assert isinstance(run_in_batch, bool), 'run_in_batch must be boolean'
+        assert not isinstance(poll_interval, bool) and\
+            isinstance(poll_interval, int) and poll_interval > 0,\
+            'poll_interval must be positive integer'
+
+        if base_command is not None:
+            try:
+                self.base_command = utils.validate_command(base_command)
+            except AssertionError, e:
+                raise ValueError('invalid base-command: ' + e.message)
+        else:
+             self.base_command = 'nohup {script} > {logfile} 2>&1'
+
+        if base_log is not None:
+            try:
+                self.base_log = utils.validate_log_file(base_log)
+            except AssertionError, e:
+                raise ValueError('invalid base-log: ' + e.message)
+        else:
+            self.base_log = '{name}_step_{i}.log'
+
         self.workdir = workdir if workdir is not None else '.'
         self.run_in_batch = run_in_batch
         self.poll_interval = poll_interval
@@ -54,7 +80,7 @@ class BasePipelineExecutor:
         pass
 
     @abc.abstractmethod
-    def execute_command(self, *args, **kwargs):
+    def execute_command(self, command):
         pass
 
     @abc.abstractmethod
@@ -122,14 +148,13 @@ class BasePipelineExecutor:
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
         """
-        base_cmd= 'cd {job_dir} && nohup {script} > {logfile} 2>&1 && cd .. &'
-        base_logname = '{name}_step_{i}.log'
+        base_cmd= 'cd {job_dir} && ' + self.base_command + ' && cd .. &'
 
         for i, step in enumerate(job_steps, start=1):
             commands = list()
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
-                log_file = base_logname.format(name=job_name, i=i)
+                log_file = self.base_log.format(name=job_name, i=i)
                 command = base_cmd.format(job_dir=job_name,
                                           script=script,
                                           logfile=log_file)
@@ -158,8 +183,7 @@ class BasePipelineExecutor:
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
         """
-        base_command = 'nohup {script} > {logfile} 2>&1 &\n echo $!'
-        base_logname = '{name}_step_{i}.log'
+        base_command = self.base_command + ' &\n echo $!'
 
         for job_name in experiment_index:
             log.debug('Setting up screen: {}'.format(job_name))
@@ -172,7 +196,7 @@ class BasePipelineExecutor:
         for i, step in enumerate(job_steps, start=1):
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
-                log_file = base_logname.format(name=job_name, i=i)
+                log_file = self.base_log.format(name=job_name, i=i)
                 command = base_command.format(script=script, logfile=log_file)
 
                 # Execute script in screen.
@@ -228,3 +252,25 @@ class BasePipelineExecutor:
     def _mkdir(self, dir):
         self.execute_command('mkdir {}'.format(dir))
 
+
+class LocalPipelineExecutor(BasePipelineExecutor):
+
+    """
+    Executor class running pipeline locally.
+    """
+
+    def poll_jobs(self):
+        raise NotImplementedError
+
+    def execute_command(self, command):
+        """
+        :param command:
+        :return:
+        """
+        subprocess.Popen(command)
+
+    def disconnect(self, *args, **kwargs):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
