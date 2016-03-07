@@ -1,5 +1,6 @@
 import yaml
 import re
+import collections
 
 from doepipeline.utils import parse_job_to_template_string
 
@@ -54,8 +55,8 @@ class PipelineGenerator:
 
         Parameter settings from experimental design are used to
         render template script strings. Results are are returned
-        in a dict with experiment indexes as key and list containing
-        pipeline strings.
+        in an :class:`OrderedDict` with experiment indexes as key
+        and list containing pipeline strings.
 
         Example output:
         pipeline_collection = {
@@ -69,9 +70,9 @@ class PipelineGenerator:
         :param exp_id_column: Column of experimental identifiers.
         :type exp_id_column: str | None
         :return: Dictionary containing rendered script strings.
-        :rtype: dict
+        :rtype: collections.OrderedDict
         """
-        pipeline_collection = dict()
+        pipeline_collection = collections.OrderedDict()
 
         for i, experiment in experiment_design.iterrows():
             if exp_id_column is not None:
