@@ -34,6 +34,25 @@ class PipelineRunFailed(Exception):
 
 
 class BasePipelineExecutor:
+    """ Base-class for pipeline executor classes.
+
+    Implements parallel pipeline execution given pipeline collection
+    from :class:`doepipeline.generator.PipelineGenerator`. Pipeline
+    can either be run in parallel using Linux screens or batch-sripts.
+
+    Attributes:
+    :ivar workdir:
+    :ivar base_script:
+    :ivar base_log:
+    :ivar run_in_batch:
+    :ivar poll_interval:
+    :ivar running_jobs:
+
+    Class attributes:
+    :cvar JOB_FINISHED:
+    :cvar JOB_RUNNING:
+    :cvar JOB_FAILED:
+    """
 
     __metaclass__ = abc.ABCMeta
 
@@ -80,8 +99,29 @@ class BasePipelineExecutor:
         pass
 
     @abc.abstractmethod
-    def execute_command(self, command):
-        pass
+    def execute_command(self, command, watch=False, **kwargs):
+        """ Extend to execute the given command in current execution
+        environment.
+
+        Base-class provides basic input validation and if `watch` is
+        True, the current command is added the instances `current_jobs`.
+
+        :param str command: Command to execute.
+        :param bool watch: If True, add command to process to watch.
+        :param kwargs: Additional keyword arguments.
+        """
+        try:
+            assert isinstance(command, str) and command.strip(),\
+                'command must be a string'
+            assert isinstance(watch, bool), 'watch must be boolean'
+            if watch:
+                assert 'job_name' in kwargs,\
+                    'if watch is True, job_name must be given'
+        except AssertionError, e:
+            raise ValueError(e.message)
+
+        if watch:
+            self.running_jobs[kwargs.pop('job_name')] = command
 
     @abc.abstractmethod
     def poll_jobs(self):
@@ -153,30 +193,32 @@ class BasePipelineExecutor:
         else:
             base = self.base_command
 
-        base_command= 'cd {job_dir} && {log_script}' + base + ' && cd .. &'
+        base_command= 'cd {job_dir} && {{log_script}}' + base + ' && cd .. &'
 
         for i, step in enumerate(job_steps, start=1):
             commands = list()
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
                 log_file = self.base_log.format(name=job_name, i=i)
-                command = base_command.format(job_dir=job_name,
-                                              script=script)
 
-                # Optional script formatting.
                 try:
-                    command = command.format(logfile=log_file)
+                    command = base_command.format(job_dir=job_name,
+                                                  script=script)
                 except KeyError:
-                    command = command.format(log_script='')
-                else:
+                    command = base_command.format(job_dir=job_name,
+                                                  script=script,
+                                                  logfile=log_file)
                     log_script = 'touch {logfile} && '.format(logfile=log_file)
                     command = command.format(log_script=log_script)
+                else:
+                    command = command.format(log_script='')
 
                 commands.append(command)
 
             commands.append('wait')
             batch_command = ' '.join(commands)
-            self.execute_command(batch_command)
+            self.execute_command(batch_command, watch=True,
+                                 job_name='batch_{}'.format(i))
 
             try:
                 self._wait_until_current_jobs_are_finished()
@@ -228,8 +270,7 @@ class BasePipelineExecutor:
                     if has_log:
                         self.execute_command('touch {log}'.format(log=log_file))
                     log.debug('Executes: {}'.format(command))
-                    self.execute_command(command)
-                    self.running_jobs[job_name] = command
+                    self.execute_command(command, watch=True, job_name=job_name)
 
             try:
                 self._wait_until_current_jobs_are_finished()

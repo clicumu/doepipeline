@@ -1,8 +1,10 @@
 import unittest
 import pandas as pd
 import types
+import time
 
-from doepipeline.executor import BasePipelineExecutor, CommandError
+from doepipeline.executor import BasePipelineExecutor, CommandError,\
+    PipelineRunFailed
 from doepipeline.generator import PipelineGenerator
 
 
@@ -25,7 +27,8 @@ class MockExecutor(BasePipelineExecutor):
     def disconnect(self, *args, **kwargs):
         pass
 
-    def execute_command(self, command):
+    def execute_command(self, command, watch=False, **kwargs):
+        super(MockExecutor, self).execute_command(command, watch, **kwargs)
         self.scripts.append(command)
 
     def poll_jobs(self):
@@ -167,7 +170,6 @@ class TestBaseExecutorSetup(ExecutorTestCase):
         self.assertListEqual(expected_steps, output['steps'])
 
 
-
 class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
     def make_expected_scripts(self, workdir, base_script, executor, use_log=False):
@@ -226,20 +228,115 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
                                                       executor, True)
         self.assertListEqual(expected_scripts, executor.scripts)
 
+    def test_failed_screen_run_poll_raises_PipelineRunFailed(self):
+        executor = MockExecutor(run_in_batch=False, base_command='{script}')
+        def poll_fail():
+            return MockExecutor.JOB_FAILED, 'Error'
+
+        executor.poll_jobs = poll_fail
+
+        with self.assertRaises(PipelineRunFailed) as cm:
+            executor.run_pipeline_collection(self.pipeline)
+            self.assertEqual(cm.message, 'Error')
+
+    def test_running_screens_polls_again_and_breaks_when_finished(self):
+        executor = MockExecutor(run_in_batch=False,
+                                base_command='{script}',
+                                poll_interval=1)
+
+        poll_checks = {'polls': 0, 'checked': False, 'time': 0}
+        def mock_poll():
+            poll_checks['polls'] += 1
+            if poll_checks['checked']:
+                poll_checks['time'] -= time.time()
+                return MockExecutor.JOB_FINISHED, ''
+            else:
+                poll_checks['time'] = time.time()
+                poll_checks['checked'] = True
+                return MockExecutor.JOB_RUNNING, ''
+
+        executor.poll_jobs = mock_poll
+        executor.run_pipeline_collection(self.pipeline)
+        self.assertGreaterEqual(poll_checks['polls'], 2)
+        self.assertGreater(abs(poll_checks['time']), 1)
+
 
 class TestBaseExecutorRunsBatches(ExecutorTestCase):
 
-    def test_job_run_in_batch(self):
-        executor = MockExecutor(base_command='{script}')
-        executor.run_pipeline_collection(self.pipeline)
+    def make_expected_scripts(self, workdir, base_script, executor, use_log=False):
         job1, job2 = self.design['Exp Id'].tolist()
 
         # Run-setup.
         expected_scripts = [
-            'cd {}'.format(executor.workdir),
+            'cd {}'.format(workdir),
             'mkdir {}'.format(job1),
             'mkdir {}'.format(job2)
         ]
         for step in range(2):
+            prepared_jobs = list()
             for job, i in zip((job1, job2), (1, 2)):
-                pass
+                current_commands = ['cd {}'.format(job)]
+                script_step = self.pipeline[job][step]
+
+                if use_log:
+                    log_file = executor.base_log.format(name=job, i=step + 1)
+                    current_commands.append('touch {}'.format(log_file))
+                    script = base_script.format(script=script_step,
+                                                logfile=log_file)
+                else:
+                    script = base_script.format(script=script_step)
+
+                current_commands += [script, 'cd ..']
+                prepared_jobs.append(' && '.join(current_commands) + ' &')
+            expected_scripts.append(' '.join(prepared_jobs))
+            expected_scripts[-1] += ' wait'
+
+        return expected_scripts
+
+    def test_run_batch_without_log_gives_correct_output(self):
+        executor = MockExecutor(run_in_batch=True, base_command='{script}')
+        executor.run_pipeline_collection(self.pipeline)
+        expected_scripts = self.make_expected_scripts('.', '{script}', executor)
+        self.assertListEqual(expected_scripts, executor.scripts)
+
+    def test_run_batch_with_log_gives_correct_output(self):
+        base_cmd = '{script} > {logfile}'
+        executor = MockExecutor(run_in_batch=True,
+                                base_command=base_cmd)
+        executor.run_pipeline_collection(self.pipeline)
+        expected_scripts = self.make_expected_scripts('.', base_cmd,
+                                                      executor, use_log=True)
+        self.maxDiff = None
+        self.assertListEqual(expected_scripts, executor.scripts)
+
+    def test_failed_batch_run_poll_raises_PipelineRunFailed(self):
+        executor = MockExecutor(run_in_batch=True, base_command='{script}')
+        def poll_fail():
+            return MockExecutor.JOB_FAILED, 'Error'
+
+        executor.poll_jobs = poll_fail
+
+        with self.assertRaises(PipelineRunFailed) as cm:
+            executor.run_pipeline_collection(self.pipeline)
+            self.assertEqual(cm.message, 'Error')
+
+    def test_running_screens_polls_again_and_breaks_when_finished(self):
+        executor = MockExecutor(run_in_batch=True,
+                                base_command='{script}',
+                                poll_interval=1)
+
+        poll_checks = {'polls': 0, 'checked': False, 'time': 0}
+        def mock_poll():
+            poll_checks['polls'] += 1
+            if poll_checks['checked']:
+                poll_checks['time'] -= time.time()
+                return MockExecutor.JOB_FINISHED, ''
+            else:
+                poll_checks['time'] = time.time()
+                poll_checks['checked'] = True
+                return MockExecutor.JOB_RUNNING, ''
+
+        executor.poll_jobs = mock_poll
+        executor.run_pipeline_collection(self.pipeline)
+        self.assertGreaterEqual(poll_checks['polls'], 2)
+        self.assertGreater(abs(poll_checks['time']), 1)
