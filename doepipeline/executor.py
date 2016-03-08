@@ -91,14 +91,6 @@ class BasePipelineExecutor:
         self.running_jobs = dict()
 
     @abc.abstractmethod
-    def connect(self, *args, **kwargs):
-        pass
-
-    @abc.abstractmethod
-    def disconnect(self, *args, **kwargs):
-        pass
-
-    @abc.abstractmethod
     def execute_command(self, command, watch=False, **kwargs):
         """ Extend to execute the given command in current execution
         environment.
@@ -125,7 +117,21 @@ class BasePipelineExecutor:
 
     @abc.abstractmethod
     def poll_jobs(self):
-        pass
+        """ Abstract method.
+
+        Implement method to check status of running jobs.
+        The method should return a tuple of two consisting
+        of job-status and a message.
+
+        Allowed statuses are:
+
+        * `JOB_RUNNING` / "job_running"
+        * `JOB_FINISHED` / "job_finished"
+        * `JOB_FAILED` / "job_failed"
+
+        :returns: status, message
+        :rtype: str, str
+        """
 
     def run_pipeline_collection(self, pipeline_collection):
         """
@@ -324,19 +330,40 @@ class LocalPipelineExecutor(BasePipelineExecutor):
     """
     Executor class running pipeline locally.
     """
+    def __init__(self, *args, **kwargs):
+        super(LocalPipelineExecutor, self).__init__(*args, **kwargs)
+        self.running_jobs = dict()
 
     def poll_jobs(self):
-        raise NotImplementedError
+        still_running = list()
+        for job_name, process in self.running_jobs.items():
+            if process.poll() is None:
+                still_running.append(job_name)
+            else:
+                if process.return_code != 0:
+                    return self.JOB_FAILED, '{} has failed'.format(job_name)
+                else:
+                    self.running_jobs.pop(job_name)
 
-    def execute_command(self, command):
+        if still_running:
+            msg = '{} still running'.format(', '.join(still_running))
+            return self.JOB_RUNNING, msg
+        else:
+            return self.JOB_FINISHED, 'no jobs running.'
+
+    def execute_command(self, command, watch=False, **kwargs):
+        """ Execute given command by executing it in subprocess.
+
+        Calls are made using `subprocess`-module like::
+
+            process = subprocess.Popen(command, shell=True)
+
+        :param str command: Command to execute.
+        :param bool watch: If True, monitor process.
+        :param kwargs: Keyword-arguments.
         """
-        :param command:
-        :return:
-        """
-        subprocess.Popen(command)
-
-    def disconnect(self, *args, **kwargs):
-        pass
-
-    def connect(self, *args, **kwargs):
-        pass
+        super(LocalPipelineExecutor, self).execute_command(command, watch,
+                                                           **kwargs)
+        process = subprocess.Popen(command, shell=True)
+        if watch:
+            self.running_jobs[kwargs.pop('job_name')] = process

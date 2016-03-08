@@ -1,10 +1,12 @@
 import unittest
+import mock
 import pandas as pd
 import types
 import time
+import subprocess
 
 from doepipeline.executor import BasePipelineExecutor, CommandError,\
-    PipelineRunFailed
+    PipelineRunFailed, LocalPipelineExecutor
 from doepipeline.generator import PipelineGenerator
 
 
@@ -170,6 +172,29 @@ class TestBaseExecutorSetup(ExecutorTestCase):
         self.assertListEqual(expected_steps, output['steps'])
 
 
+class TestBaseExecutorExecutions(ExecutorTestCase):
+
+    def test_bad_command_input_raises_ValueError(self):
+        executor = MockExecutor()
+        bad_commands = [
+            '',
+            0,
+            True,
+            ['Commands'],
+            {'command': 'again'},
+            '   ',
+            '\n',
+            '\t',
+        ]
+        for bad_command in bad_commands:
+            self.assertRaises(ValueError, executor.execute_command, bad_command)
+
+    def test_watch_without_job_name_raises_ValueError(self):
+        executor = MockExecutor()
+        self.assertRaises(ValueError, executor.execute_command,
+                          'command', watch=True)
+
+
 class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
     def make_expected_scripts(self, workdir, base_script, executor, use_log=False):
@@ -239,26 +264,26 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
             executor.run_pipeline_collection(self.pipeline)
             self.assertEqual(cm.message, 'Error')
 
-    def test_running_screens_polls_again_and_breaks_when_finished(self):
+    @mock.patch('time.sleep')
+    def test_running_screens_polls_again_and_breaks_when_finished(self,
+                                                                  mock_sleep):
         executor = MockExecutor(run_in_batch=False,
                                 base_command='{script}',
                                 poll_interval=1)
 
-        poll_checks = {'polls': 0, 'checked': False, 'time': 0}
+        poll_checks = {'polls': 0, 'checked': False}
         def mock_poll():
             poll_checks['polls'] += 1
             if poll_checks['checked']:
-                poll_checks['time'] -= time.time()
                 return MockExecutor.JOB_FINISHED, ''
             else:
-                poll_checks['time'] = time.time()
                 poll_checks['checked'] = True
                 return MockExecutor.JOB_RUNNING, ''
 
         executor.poll_jobs = mock_poll
         executor.run_pipeline_collection(self.pipeline)
         self.assertGreaterEqual(poll_checks['polls'], 2)
-        self.assertGreater(abs(poll_checks['time']), 1)
+        mock_sleep.assert_called_with(executor.poll_interval)
 
 
 class TestBaseExecutorRunsBatches(ExecutorTestCase):
@@ -294,20 +319,22 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
         return expected_scripts
 
     def test_run_batch_without_log_gives_correct_output(self):
-        executor = MockExecutor(run_in_batch=True, base_command='{script}')
-        executor.run_pipeline_collection(self.pipeline)
-        expected_scripts = self.make_expected_scripts('.', '{script}', executor)
-        self.assertListEqual(expected_scripts, executor.scripts)
+        for base_script in ('{script} &', '{script}'):
+            executor = MockExecutor(run_in_batch=True, base_command=base_script)
+            executor.run_pipeline_collection(self.pipeline)
+            expected_scripts = self.make_expected_scripts('.', '{script}', executor)
+            self.assertListEqual(expected_scripts, executor.scripts)
 
     def test_run_batch_with_log_gives_correct_output(self):
-        base_cmd = '{script} > {logfile}'
-        executor = MockExecutor(run_in_batch=True,
-                                base_command=base_cmd)
-        executor.run_pipeline_collection(self.pipeline)
-        expected_scripts = self.make_expected_scripts('.', base_cmd,
-                                                      executor, use_log=True)
-        self.maxDiff = None
-        self.assertListEqual(expected_scripts, executor.scripts)
+        base_command = '{script} > {logfile}'
+        for command in (base_command, base_command + ' &'):
+            executor = MockExecutor(run_in_batch=True,
+                                    base_command=command)
+            executor.run_pipeline_collection(self.pipeline)
+            expected_scripts = self.make_expected_scripts('.', base_command,
+                                                          executor, use_log=True)
+            self.maxDiff = None
+            self.assertListEqual(expected_scripts, executor.scripts)
 
     def test_failed_batch_run_poll_raises_PipelineRunFailed(self):
         executor = MockExecutor(run_in_batch=True, base_command='{script}')
@@ -320,23 +347,126 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
             executor.run_pipeline_collection(self.pipeline)
             self.assertEqual(cm.message, 'Error')
 
-    def test_running_screens_polls_again_and_breaks_when_finished(self):
+    @mock.patch('time.sleep')
+    def test_running_screens_polls_again_and_breaks_when_finished(self,
+                                                                  mock_sleep):
         executor = MockExecutor(run_in_batch=True,
                                 base_command='{script}',
                                 poll_interval=1)
 
-        poll_checks = {'polls': 0, 'checked': False, 'time': 0}
+        poll_checks = {'polls': 0, 'checked': False}
         def mock_poll():
             poll_checks['polls'] += 1
             if poll_checks['checked']:
-                poll_checks['time'] -= time.time()
                 return MockExecutor.JOB_FINISHED, ''
             else:
-                poll_checks['time'] = time.time()
                 poll_checks['checked'] = True
                 return MockExecutor.JOB_RUNNING, ''
 
         executor.poll_jobs = mock_poll
         executor.run_pipeline_collection(self.pipeline)
         self.assertGreaterEqual(poll_checks['polls'], 2)
-        self.assertGreater(abs(poll_checks['time']), 1)
+        mock_sleep.assert_called_with(executor.poll_interval)
+
+
+class TestLocalExecutor(ExecutorTestCase):
+
+    @mock.patch('subprocess.Popen')
+    def test_Popen_is_called_when_command_executes(self, mock_popen):
+        executor = LocalPipelineExecutor()
+        command = 'hello'
+        executor.execute_command(command)
+        mock_popen.assert_called_with(command, shell=True)
+
+    @mock.patch('subprocess.Popen')
+    def test_process_saved_when_command_called_with_watch(self, mock_popen):
+        executor = LocalPipelineExecutor()
+        command = 'hello'
+        job_name = 'name'
+        executor.execute_command(command, watch=True, job_name=job_name)
+        mock_popen.assert_called_with(command, shell=True)
+        self.assertIn(job_name, executor.running_jobs)
+        self.assertIs(executor.running_jobs[job_name], mock_popen.return_value)
+
+    @mock.patch('subprocess.Popen')
+    def test_Popen_is_not_called_with_bad_command(self, mock_popen):
+        executor = LocalPipelineExecutor()
+        bad_commands = [
+            '',
+            0,
+            True,
+            ['Commands'],
+            {'command': 'again'},
+            '   ',
+            '\n',
+            '\t',
+        ]
+        for bad_command in bad_commands:
+            self.assertRaises(ValueError, executor.execute_command, bad_command)
+            self.assertFalse(mock_popen.called)
+
+    @mock.patch('subprocess.Popen')
+    def test_PipelineRunFailed_raised_when_subprocess_failed(self, mock_popen):
+        mock_popen.return_value.poll.return_value = -1
+        mock_popen.return_value.return_code = -1
+
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
+        self.assertRaises(PipelineRunFailed,
+                          batch_executor.run_pipeline_collection,
+                          self.pipeline)
+
+        screen_executor = LocalPipelineExecutor()
+        self.assertRaises(PipelineRunFailed,
+                          screen_executor.run_pipeline_collection,
+                          self.pipeline)
+
+    @mock.patch('time.sleep')
+    @mock.patch('subprocess.Popen')
+    def test_job_are_finished_when_return_code_is_zero(self, mock_popen,
+                                                       mock_sleep):
+        mock_popen.return_value.poll.return_value = 0
+        mock_popen.return_value.return_code = 0
+
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
+        batch_executor.run_pipeline_collection(self.pipeline)
+
+        self.assertEqual(len(batch_executor.running_jobs), 0)
+        self.assertFalse(mock_sleep.called)
+
+        screen_executor = LocalPipelineExecutor()
+        screen_executor.run_pipeline_collection(self.pipeline)
+
+        self.assertEqual(len(screen_executor.running_jobs), 0)
+        self.assertFalse(mock_sleep.called)
+
+    @mock.patch('time.sleep')
+    @mock.patch('subprocess.Popen')
+    def test_jobs_are_polled_agained_when_poll_is_None(self, mock_popen,
+                                                       mock_sleep):
+        polled = {'yes': False, 'calls': 0}
+
+        def poll():
+            polled['calls'] += 1
+            if polled['yes']:
+                mock_popen.return_value.return_code = 0
+                return 0
+            else:
+                polled['yes'] = True
+                return None
+
+        mock_popen.return_value.poll = poll
+
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
+        batch_executor.run_pipeline_collection(self.pipeline)
+
+        # Called twice for first step and once for second.
+        self.assertEqual(polled['calls'], 3)
+
+        polled['yes'] = False
+        polled['calls'] = 0
+
+        screen_executor = LocalPipelineExecutor(run_in_batch=True)
+        screen_executor.run_pipeline_collection(self.pipeline)
+
+        # Called twice for first step and once for second.
+        self.assertEqual(polled['calls'], 3)
