@@ -1,39 +1,14 @@
+import copy
+import types
 import unittest
+
 import mock
 import pandas as pd
-import types
-import copy
 
-from doepipeline.executor import BasePipelineExecutor, CommandError,\
-    PipelineRunFailed, LocalPipelineExecutor
+from doepipeline.executor.base import CommandError, PipelineRunFailed
+from doepipeline.executor import LocalPipelineExecutor
 from doepipeline.generator import PipelineGenerator
-
-
-class MockExecutor(BasePipelineExecutor):
-
-    """
-    Mock-implementation of :class:`BasePipelineExecutor` which
-    stores all called command in list.
-
-    Used to test functionality of :class:`BasePipelineExecutor`
-    """
-
-    def __init__(self, *args, **kwargs):
-        super(MockExecutor, self).__init__(*args, **kwargs)
-        self.scripts = list()
-
-    def connect(self, *args, **kwargs):
-        pass
-
-    def disconnect(self, *args, **kwargs):
-        pass
-
-    def execute_command(self, command, watch=False, **kwargs):
-        super(MockExecutor, self).execute_command(command, watch, **kwargs)
-        self.scripts.append(command)
-
-    def poll_jobs(self):
-        return self.JOB_FINISHED, ''
+from doepipeline.tests.mock_classes import *
 
 
 class ExecutorTestCase(unittest.TestCase):
@@ -77,42 +52,38 @@ class ExecutorTestCase(unittest.TestCase):
 class TestBaseExecutorSetup(ExecutorTestCase):
 
     def test_creation_doesnt_crash(self):
-        executor = MockExecutor()
+        executor = MockBaseExecutor()
 
     def test_bad_creation_does_crash(self):
         bad_input = [
             ('workdir', 123),
             ('workdir', ''),
             ('workdir', True),
-            ('run_in_batch', 'true'),
-            ('run_in_batch', 1),
-            ('run_in_batch', 0),
-            ('run_in_batch', None),
             ('poll_interval', 0),
             ('poll_interval', -1),
             ('poll_interval', 'number'),
             ('poll_interval', True)
         ]
         for input in bad_input:
-            self.assertRaises(AssertionError, MockExecutor, **dict([input]))
+            self.assertRaises(AssertionError, MockBaseExecutor, **dict([input]))
 
     def test_invalid_base_script_raises_ValueError(self):
-        self.assertRaises(ValueError, MockExecutor,
+        self.assertRaises(ValueError, MockBaseExecutor,
                           base_command='{script}_{bad}')
-        self.assertRaises(ValueError, MockExecutor,
+        self.assertRaises(ValueError, MockBaseExecutor,
                           base_command='no_script_{logfile}')
-        self.assertRaises(ValueError, MockExecutor, base_command='no_script')
+        self.assertRaises(ValueError, MockBaseExecutor, base_command='no_script')
 
     def test_invalid_base_log_raises_ValueError(self):
-        self.assertRaises(ValueError, MockExecutor, base_log='{bad_tag}_{i}')
-        self.assertRaises(ValueError, MockExecutor, base_log='{name}_{bad_tag}')
-        self.assertRaises(ValueError, MockExecutor, base_log='{name}_no_i')
-        self.assertRaises(ValueError, MockExecutor, base_log='{i}_no_name')
+        self.assertRaises(ValueError, MockBaseExecutor, base_log='{bad_tag}_{i}')
+        self.assertRaises(ValueError, MockBaseExecutor, base_log='{name}_{bad_tag}')
+        self.assertRaises(ValueError, MockBaseExecutor, base_log='{name}_no_i')
+        self.assertRaises(ValueError, MockBaseExecutor, base_log='{i}_no_name')
 
     def test_run_pipeline_sets_up_properly(self):
 
         for workdir in (None, 'foldername', 'path/to/folder'):
-            executor = MockExecutor(run_in_batch=False, workdir=workdir)
+            executor = MockBaseExecutor(workdir=workdir)
 
             # Monkey patch out screen-run to truncate script output.
             executor.run_in_screens = lambda steps, index, envs: None
@@ -127,7 +98,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
 
     def test_run_pipeline_sets_up_properly_when_no_workdir(self):
         for workdir in (None, 'foldername', 'path/to/folder'):
-            executor = MockExecutor(run_in_batch=False, workdir=workdir)
+            executor = MockBaseExecutor(workdir=workdir)
 
             # Monkey patch out screen-run to truncate script output.
             executor.run_in_screens = lambda steps, index, envs: None
@@ -154,7 +125,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
             self.assertListEqual(expected_scripts, executor.scripts)
 
     def test_job_steps_are_prepared_properly(self):
-        executor = MockExecutor(run_in_batch=False)
+        executor = MockScreenExecutor()
 
         # Monkey patch out screen-run to simply return output.
         output = dict()
@@ -178,7 +149,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
 class TestBaseExecutorExecutions(ExecutorTestCase):
 
     def test_bad_command_input_raises_ValueError(self):
-        executor = MockExecutor()
+        executor = MockBaseExecutor()
         bad_commands = [
             '',
             0,
@@ -193,7 +164,7 @@ class TestBaseExecutorExecutions(ExecutorTestCase):
             self.assertRaises(ValueError, executor.execute_command, bad_command)
 
     def test_watch_without_job_name_raises_ValueError(self):
-        executor = MockExecutor()
+        executor = MockBaseExecutor()
         self.assertRaises(ValueError, executor.execute_command,
                           'command', watch=True)
 
@@ -245,7 +216,7 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
     def test_run_jobs_without_logs_give_correct_output(self):
         base_cmd = '{script}'
-        executor = MockExecutor(run_in_batch=False, base_command=base_cmd)
+        executor = MockScreenExecutor(base_command=base_cmd)
         executor.run_pipeline_collection(self.pipeline)
         expected_scripts = self.make_expected_scripts('.', base_cmd,
                                                       executor, False)
@@ -253,17 +224,16 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
     def test_run_jobs_with_logs_give_corrext_output(self):
         base_cmd = '{script}_{logfile}'
-        executor = MockExecutor(run_in_batch=False,
-                                base_command=base_cmd)
+        executor = MockScreenExecutor(base_command=base_cmd)
         executor.run_pipeline_collection(self.pipeline)
         expected_scripts = self.make_expected_scripts('.', base_cmd,
                                                       executor, True)
         self.assertListEqual(expected_scripts, executor.scripts)
 
     def test_failed_screen_run_poll_raises_PipelineRunFailed(self):
-        executor = MockExecutor(run_in_batch=False, base_command='{script}')
+        executor = MockScreenExecutor(base_command='{script}')
         def poll_fail():
-            return MockExecutor.JOB_FAILED, 'Error'
+            return MockBaseExecutor.JOB_FAILED, 'Error'
 
         executor.poll_jobs = poll_fail
 
@@ -274,18 +244,16 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
     @mock.patch('time.sleep')
     def test_running_screens_polls_again_and_breaks_when_finished(self,
                                                                   mock_sleep):
-        executor = MockExecutor(run_in_batch=False,
-                                base_command='{script}',
-                                poll_interval=1)
+        executor = MockScreenExecutor(base_command='{script}', poll_interval=1)
 
         poll_checks = {'polls': 0, 'checked': False}
         def mock_poll():
             poll_checks['polls'] += 1
             if poll_checks['checked']:
-                return MockExecutor.JOB_FINISHED, ''
+                return MockBaseExecutor.JOB_FINISHED, ''
             else:
                 poll_checks['checked'] = True
-                return MockExecutor.JOB_RUNNING, ''
+                return MockBaseExecutor.JOB_RUNNING, ''
 
         executor.poll_jobs = mock_poll
         executor.run_pipeline_collection(self.pipeline)
@@ -331,7 +299,7 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
 
     def test_run_batch_without_log_gives_correct_output(self):
         for base_script in ('{script} &', '{script}'):
-            executor = MockExecutor(run_in_batch=True, base_command=base_script)
+            executor = MockBatchExecutor(base_command=base_script)
             executor.run_pipeline_collection(self.pipeline)
             expected_scripts = self.make_expected_scripts('.', '{script}', executor)
             self.assertListEqual(expected_scripts, executor.scripts)
@@ -339,8 +307,7 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
     def test_run_batch_with_log_gives_correct_output(self):
         base_command = '{script} > {logfile}'
         for command in (base_command, base_command + ' &'):
-            executor = MockExecutor(run_in_batch=True,
-                                    base_command=command)
+            executor = MockBatchExecutor(base_command=command)
             executor.run_pipeline_collection(self.pipeline)
             expected_scripts = self.make_expected_scripts('.', base_command,
                                                           executor, use_log=True)
@@ -348,9 +315,9 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
             self.assertListEqual(expected_scripts, executor.scripts)
 
     def test_failed_batch_run_poll_raises_PipelineRunFailed(self):
-        executor = MockExecutor(run_in_batch=True, base_command='{script}')
+        executor = MockBatchExecutor(base_command='{script}')
         def poll_fail():
-            return MockExecutor.JOB_FAILED, 'Error'
+            return MockBaseExecutor.JOB_FAILED, 'Error'
 
         executor.poll_jobs = poll_fail
 
@@ -359,20 +326,18 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
             self.assertEqual(cm.message, 'Error')
 
     @mock.patch('time.sleep')
-    def test_running_screens_polls_again_and_breaks_when_finished(self,
+    def test_when_running_polls_again_and_breaks_when_finished(self,
                                                                   mock_sleep):
-        executor = MockExecutor(run_in_batch=True,
-                                base_command='{script}',
-                                poll_interval=1)
+        executor = MockBatchExecutor(base_command='{script}')
 
         poll_checks = {'polls': 0, 'checked': False}
         def mock_poll():
             poll_checks['polls'] += 1
             if poll_checks['checked']:
-                return MockExecutor.JOB_FINISHED, ''
+                return MockBaseExecutor.JOB_FINISHED, ''
             else:
                 poll_checks['checked'] = True
-                return MockExecutor.JOB_RUNNING, ''
+                return MockBaseExecutor.JOB_RUNNING, ''
 
         executor.poll_jobs = mock_poll
         executor.run_pipeline_collection(self.pipeline)
