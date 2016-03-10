@@ -1,0 +1,26 @@
+before_run:
+    environment_variabels:
+        MY_DIR: ~/my/dir/
+
+pipeline:
+    - MyFirstJob
+    - MySecondJob
+
+MyFirstJob:
+    script: >
+        bash first_script_command.sh -o $MY_DIR
+    factors:
+        FactorA:
+            factor_name: Factor A
+            script_option: --factor_a
+        FactorB:
+            factor_name: Factor B
+            script_option: --factor_b
+
+MySecondJob:
+    script: >
+        bash my_second_script.sh --expressionWithFactors {% FactorC %}
+    factors:
+        FactorC:
+            factor_name: Factor C
+            substitute: true
