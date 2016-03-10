@@ -31,6 +31,7 @@ class BaseGeneratorTestCase(unittest.TestCase):
         }
 
         self.config = {
+            'before_run': {'environment_variables': {'MYPATH': '~/a/path'}},
             'pipeline': ['ScriptWithOptions', 'ScriptWithSub'],
             'ScriptWithOptions': self.script_w_opt,
             'ScriptWithSub': self.script_w_sub
@@ -77,14 +78,18 @@ class TestMakePipeline(BaseGeneratorTestCase):
 
     def setUp(self):
         super(TestMakePipeline, self).setUp()
+        self.env_vars = {key: value for key, value in \
+                         self.config['before_run']['environment_variables'].items()}
         self.runner = PipelineGenerator(self.config)
         self.scripts1 = ['./script_a --option 0.1', './script_b 0.2']
         self.scripts2 = ['./script_a --option 0.3', './script_b 0.4']
 
     def test_render_experiments_without_id_column(self):
         pipeline_collection = self.runner.new_pipeline_collection(self.design)
-        self.assertDictEqual({'0': self.scripts1, '1': self.scripts2}, pipeline_collection)
+        self.assertDictEqual({'0': self.scripts1, '1': self.scripts2,
+                              'ENV_VARIABLES': self.env_vars}, pipeline_collection)
 
     def test_render_experiments_with_id_column(self):
         new_collection = self.runner.new_pipeline_collection(self.design, 'Exp Id')
-        self.assertDictEqual({'A': self.scripts1, 'B': self.scripts2}, new_collection)
+        self.assertDictEqual({'A': self.scripts1, 'B': self.scripts2,
+                              'ENV_VARIABLES': self.env_vars}, new_collection)

@@ -2,8 +2,7 @@ import unittest
 import mock
 import pandas as pd
 import types
-import time
-import subprocess
+import copy
 
 from doepipeline.executor import BasePipelineExecutor, CommandError,\
     PipelineRunFailed, LocalPipelineExecutor
@@ -58,7 +57,11 @@ class ExecutorTestCase(unittest.TestCase):
                 }
             }
         }
+
+        self.env_vars = {'MYPATH': '~/a/path'}
+        before = {'environment_variables': self.env_vars}
         self.config = {
+            'before_run': before,
             'pipeline': ['ScriptOne', 'ScriptTwo'],
             'ScriptOne': script_one,
             'ScriptTwo': script_two
@@ -67,7 +70,7 @@ class ExecutorTestCase(unittest.TestCase):
             ['One', .1, .2],
             ['Two', .3, .4]
         ], columns=['Exp Id', 'Factor A', 'Factor B'])
-        self.generator = PipelineGenerator(self.config)
+        self.generator = PipelineGenerator(copy.deepcopy(self.config))
         self.pipeline = self.generator.new_pipeline_collection(self.design,'Exp Id')
 
 
@@ -112,7 +115,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
             executor = MockExecutor(run_in_batch=False, workdir=workdir)
 
             # Monkey patch out screen-run to truncate script output.
-            executor.run_in_screens = lambda steps, index: None
+            executor.run_in_screens = lambda steps, index, envs: None
 
             executor.run_pipeline_collection(self.pipeline)
             expected_scripts = [
@@ -127,7 +130,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
             executor = MockExecutor(run_in_batch=False, workdir=workdir)
 
             # Monkey patch out screen-run to truncate script output.
-            executor.run_in_screens = lambda steps, index: None
+            executor.run_in_screens = lambda steps, index, envs: None
 
             # Monkey patch to emulate failed cd
             has_run = {'yes': False}
@@ -155,7 +158,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
 
         # Monkey patch out screen-run to simply return output.
         output = dict()
-        def mock_run_in_screens(steps, index):
+        def mock_run_in_screens(steps, index, envs):
             output['steps'] = steps
             output['index'] = index
 
@@ -212,9 +215,13 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
                 'screen -S {}'.format(job),
                 'screen -d',
                 'screen -r {}'.format(job),
-                'cd {}'.format(job),
-                'screen -d'
+                'cd {}'.format(job)
             ]
+            expected_scripts += [
+                '{}={}'.format(key, value)\
+                for key, value in self.env_vars.items()
+            ]
+            expected_scripts.append('screen -d')
 
         # Screen script runs.
         for step in range(2):
@@ -292,10 +299,14 @@ class TestBaseExecutorRunsBatches(ExecutorTestCase):
         job1, job2 = self.design['Exp Id'].tolist()
 
         # Run-setup.
-        expected_scripts = [
-            'cd {}'.format(workdir),
+        expected_scripts = ['cd {}'.format(workdir)]
+        expected_scripts += [
             'mkdir {}'.format(job1),
             'mkdir {}'.format(job2)
+        ]
+        expected_scripts += [
+            '{}={}'.format(key, value)
+            for key, value in self.env_vars.items()
         ]
         for step in range(2):
             prepared_jobs = list()

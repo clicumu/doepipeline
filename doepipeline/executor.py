@@ -151,9 +151,15 @@ class BasePipelineExecutor:
         pipeline_length = len(next(iter(pipeline_collection.values())))
         experiment_index = list()
         job_steps = [[] for _ in range(pipeline_length)]
+        env_variables = pipeline_collection.get('ENV_VARIABLES', None)
+        reserved = ['ENV_VARIABLES']
 
         log.info('Creating job directories.')
         for job_name, scripts in pipeline_collection.items():
+            if job_name in reserved:
+                # Don't treat special names as jobs.
+                continue
+
             experiment_index.append(job_name)
             log.debug('Creating directory: {}'.format(job_name))
             self._mkdir(job_name)
@@ -163,12 +169,12 @@ class BasePipelineExecutor:
 
         if self.run_in_batch:
             log.info('Run batch jobs')
-            self.run_batches(job_steps, experiment_index)
+            self.run_batches(job_steps, experiment_index, env_variables)
         else:
             log.info('Run jobs in parallel using screens')
-            self.run_in_screens(job_steps, experiment_index)
+            self.run_in_screens(job_steps, experiment_index, env_variables)
 
-    def run_batches(self, job_steps, experiment_index):
+    def run_batches(self, job_steps, experiment_index, env_variables):
         """ Run the collection of jobs in parallel using batch execution.
 
         Example job_steps:
@@ -193,11 +199,16 @@ class BasePipelineExecutor:
         :type job_steps: list[list]
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
+        :param env_variables: Environment variables to set.
+        :type env_variables: dict
         """
         if self.base_command.endswith(' &'):
             base = self.base_command[:-2]
         else:
             base = self.base_command
+
+        if env_variables is not None:
+            self._set_env_variables(env_variables)
 
         base_command= 'cd {job_dir} && {{log_script}}' + base + ' && cd .. &'
 
@@ -231,7 +242,7 @@ class BasePipelineExecutor:
             except PipelineRunFailed:
                 raise
 
-    def run_in_screens(self, job_steps, experiment_index):
+    def run_in_screens(self, job_steps, experiment_index, env_variables):
         """ Run the collection of jobs in parallel using screens.
 
         Example job_steps:
@@ -254,6 +265,8 @@ class BasePipelineExecutor:
             self._make_screen(job_name)
             with self.screen(job_name):
                 self._cd(job_name)
+                if env_variables is not None:
+                    self._set_env_variables(env_variables)
 
         # Run all scripts of each step in parallel using screens.
         # If a step fails, raise PipelineRunFailed.
@@ -323,6 +336,10 @@ class BasePipelineExecutor:
 
     def _mkdir(self, dir):
         self.execute_command('mkdir {}'.format(dir))
+
+    def _set_env_variables(self, env_variables):
+        for name, value in env_variables.items():
+            self.execute_command('{}={}'.format(name, value))
 
 
 class LocalPipelineExecutor(BasePipelineExecutor):

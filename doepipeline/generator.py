@@ -97,6 +97,8 @@ class PipelineGenerator:
 
             pipeline_collection[exp_id] = rendered_scripts
 
+        pipeline_collection['ENV_VARIABLES'] = self._env_variables
+
         return pipeline_collection
 
     def _validate_config(self, config_dict):
