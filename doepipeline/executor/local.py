@@ -23,9 +23,9 @@ class LocalPipelineExecutor(BatchExecutorMixin,
 
     def run_jobs(self, *args, **kwargs):
         if self.run_in_batch:
-            self.run_batches(*args, **kwargs)
+            BatchExecutorMixin.run_jobs(self, *args, **kwargs)
         else:
-            self.run_in_screens(*args, **kwargs)
+            ScreenExecutorMixin.run_jobs(self, *args, **kwargs)
 
     def poll_jobs(self):
         still_running = list()

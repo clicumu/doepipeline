@@ -7,7 +7,7 @@ log = logging.getLogger(__name__)
 
 class ScreenExecutorMixin(BasePipelineExecutor):
 
-    def run_in_screens(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Run the collection of jobs in parallel using screens.
 
         Example job_steps:
@@ -87,7 +87,7 @@ class ScreenExecutorMixin(BasePipelineExecutor):
 
 class BatchExecutorMixin(BasePipelineExecutor):
 
-    def run_batches(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Run the collection of jobs in parallel using batch execution.
 
         Example job_steps:

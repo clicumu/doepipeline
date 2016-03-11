@@ -1,52 +1,9 @@
-import copy
 import types
-import unittest
-
 import mock
-import pandas as pd
 
 from doepipeline.executor.base import CommandError, PipelineRunFailed
 from doepipeline.executor import LocalPipelineExecutor
-from doepipeline.generator import PipelineGenerator
-from doepipeline.tests.mock_classes import *
-
-
-class ExecutorTestCase(unittest.TestCase):
-
-    def setUp(self):
-        script_one = {
-            'script': './script_a',
-            'factors': {
-                'FactorA': {
-                    'factor_name': 'Factor A',
-                    'script_option': '--option'
-                }
-            }
-        }
-        script_two = {
-            'script': './script_b {% FactorB %}',
-            'factors': {
-                'FactorB': {
-                    'factor_name': 'Factor B',
-                    'substitute': True
-                }
-            }
-        }
-
-        self.env_vars = {'MYPATH': '~/a/path'}
-        before = {'environment_variables': self.env_vars}
-        self.config = {
-            'before_run': before,
-            'pipeline': ['ScriptOne', 'ScriptTwo'],
-            'ScriptOne': script_one,
-            'ScriptTwo': script_two
-        }
-        self.design = pd.DataFrame([
-            ['One', .1, .2],
-            ['Two', .3, .4]
-        ], columns=['Exp Id', 'Factor A', 'Factor B'])
-        self.generator = PipelineGenerator(copy.deepcopy(self.config))
-        self.pipeline = self.generator.new_pipeline_collection(self.design,'Exp Id')
+from doepipeline.tests.executor_utils import  *
 
 
 class TestBaseExecutorSetup(ExecutorTestCase):
@@ -133,7 +90,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
             output['steps'] = steps
             output['index'] = index
 
-        executor.run_in_screens = mock_run_in_screens
+        executor.run_jobs = mock_run_in_screens
 
         executor.run_pipeline_collection(self.pipeline)
         self.assertListEqual(output['index'], self.design['Exp Id'].values.tolist())
