@@ -13,6 +13,7 @@ Exceptions:
 import abc
 import logging
 import time
+from collections import Sequence
 
 from doepipeline import utils
 
@@ -88,7 +89,7 @@ class BasePipelineExecutor(object):
     @abc.abstractmethod
     def execute_command(self, command, watch=False, **kwargs):
         """ Extend to execute the given command in current execution
-        environment.
+        environment and returns echoed stdin, stdout, stderr.
 
         Base-class provides basic input validation and if `watch` is
         True, the current command is added the instances `current_jobs`.
@@ -96,6 +97,8 @@ class BasePipelineExecutor(object):
         :param str command: Command to execute.
         :param bool watch: If True, add command to process to watch.
         :param kwargs: Additional keyword arguments.
+        :returns: stdin, stdout, stderr
+        :rtype: tuple[str]
         """
         try:
             assert isinstance(command, str) and command.strip(),\
@@ -104,11 +107,12 @@ class BasePipelineExecutor(object):
             if watch:
                 assert 'job_name' in kwargs,\
                     'if watch is True, job_name must be given'
+                assert isinstance(kwargs['job_name'], str)\
+                       or isinstance(kwargs['job_name'], Sequence),\
+                    'job_name must be str or Sequence'
         except AssertionError, e:
             raise ValueError(e.message)
 
-        if watch:
-            self.running_jobs[kwargs.pop('job_name')] = command
 
     @abc.abstractmethod
     def poll_jobs(self):
