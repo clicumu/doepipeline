@@ -33,6 +33,7 @@ var/
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+/doepipeline/old_stuff
 
 # Installer logs
 pip-log.txt
