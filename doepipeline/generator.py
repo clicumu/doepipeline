@@ -18,24 +18,19 @@ class PipelineGenerator:
     def __init__(self, config):
         try:
             self._validate_config(config)
-        except AssertionError:
-            raise ValueError('Invalid config')
+        except AssertionError, e:
+            raise ValueError('Invalid config: ' + e.message)
 
         self._config = config
         self._current_iteration = 0
 
-        try:
-            env_variables = config['before_run'].pop('environment_variables')
-        except KeyError:
-            env_variables = None
-
-        self._env_variables = env_variables
+        self._env_variables = config['before_run'].pop('environment_variables', None)
+        self._setup_scripts = config['before_run'].pop('scripts', None)
 
         jobs = [config[job] for job in config['pipeline']]
         self._scripts_templates = [parse_job_to_template_string(job)
                                    for job in jobs]
-        self._factors = {key: factor['factor_name'] for job in jobs
-                         for key, factor in job['factors'].items()}
+        self._factors = config['design']['factors']
 
     @classmethod
     def from_yaml(cls, yaml_config, *args, **kwargs):
@@ -83,10 +78,10 @@ class PipelineGenerator:
             rendered_scripts = list()
 
             for script in self._scripts_templates:
-                for factor, factor_name in self._factors.items():
+                for factor_name in self._factors:
                     # Get current parameter setting.
                     factor_value = experiment[factor_name]
-                    replacement = {factor: factor_value}
+                    replacement = {factor_name: factor_value}
                     try:
                         script = script.format(**replacement)
                     except KeyError:
@@ -98,6 +93,8 @@ class PipelineGenerator:
             pipeline_collection[exp_id] = rendered_scripts
 
         pipeline_collection['ENV_VARIABLES'] = self._env_variables
+        pipeline_collection['SETUP_SCRIPTS'] = self._setup_scripts
+        pipeline_collection['COLLECT_RESULTS'] = self._config['collect_results']
 
         return pipeline_collection
 
@@ -109,30 +106,73 @@ class PipelineGenerator:
         :param config_dict: Pipeline configuration.
         :raises: AssertionError
         """
-        reserved_terms = 'before_run', 'pipeline'
-        valid_before = 'environment_variables'
-        assert 'pipeline' in config_dict
+        reserved_terms = 'before_run', 'pipeline', 'design', 'collect_results'
+        valid_before = 'environment_variables', 'scripts'
+        assert 'pipeline' in config_dict, 'pipeline missing'
+        assert 'design' in config_dict, 'design missing'
+        assert 'collect_results', 'collect_results missing'
 
         job_names = config_dict['pipeline']
-        assert isinstance(job_names, list)
-        assert all(job in config_dict for job in job_names)
+        assert isinstance(job_names, list), 'pipeline must be listing'
+        assert all(job in config_dict for job in job_names),\
+            'all jobs in pipeline must be specified'
         assert all(term in job_names for term in config_dict
-                   if term not in reserved_terms)
+                   if term not in reserved_terms), 'all specified jobs must be in pipeline'
+
+        if 'before_run' in config_dict:
+            before = config_dict['before_run']
+            assert all(key in valid_before for key in before),\
+                'invalid key, allowed before_run: {}'.format(', '.join(valid_before))
+            if 'scripts' in before:
+                assert isinstance(before['scripts'], list),\
+                    'before_run scripts must be a list of strings'
+                assert all(isinstance(script, str)\
+                           for script in before['scripts']),\
+                    'before_run scripts must be a list of strings'
+            if 'environment_variables' in before:
+                assert isinstance(before['environment_variables'], dict),\
+                    'environment_variables must be key-value-pairs'
+                assert all(isinstance(value, str) for value\
+                           in before['environment_variables'].values()),\
+                    'environment_variables values must be strings'
+
+        design = config_dict['design']
+        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type'
+        assert 'type' in design, 'design type is missing'
+        assert 'factors' in design, 'design factors is missing'
+        assert 'responses' in design, 'design responses is missing'
+        design_factors = design['factors']
+        design_responses = design['responses']
+        # Check that factors are specified.
+        for key, factor_settings in design_factors.items():
+            assert all(key in allowed_factor_keys for key in factor_settings),\
+                'invalid key, allowed keys for factors: {}'.format(allowed_factor_keys)
+
+        # Check that responses are specified.
+        assert isinstance(design_responses, dict),\
+            'design responses must be key-value-pairs'
+        assert all(isinstance(target, str) for target in design_responses.values()),\
+            'design responses optimization goal must be strings'
 
         jobs = [config_dict[job_name] for job_name in job_names]
 
         # Check existence of scripts and that they are simple strings.
-        assert all('script' in job for job in jobs)
-        assert all(isinstance(job['script'], str) for job in jobs)
+        assert all('script' in job for job in jobs), 'all jobs must have script'
+        assert all(isinstance(job['script'], str) for job in jobs),\
+            'job scripts must be strings'
 
         job_w_factors = [job for job in jobs if 'factors' in job]
 
         # Check factors are dicts.
         assert all(all(isinstance(factor, dict) for factor in job['factors'].values())\
-                   for job in job_w_factors)
+                   for job in job_w_factors), 'job factors must be key-value-pairs'
+        assert all(all(factor in design_factors for factor in job['factors'].keys())\
+                   for job in job_w_factors), 'job factors must be specified in design'
+
         # Check factors either script_option or substituted.
         assert all(any(['script_option' in factor, 'substitute' in factor])\
-                       for factor in job['factors'].values() for job in job_w_factors)
+                       for factor in job['factors'].values() for job in job_w_factors),\
+            'factors must be added as script option or substituted'
 
         # Get jobs with substitution
         job_w_sub = [job for job in job_w_factors if\
@@ -140,8 +180,7 @@ class PipelineGenerator:
 
         # Assert that substitution-factors can be substituted.
         for job in job_w_sub:
+            msg = 'substituted factors must be templated in script-string'
             assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script'])\
-                       for fac, fac_d in job['factors'].items() if fac_d.get('substitute', False))
-
-        if 'before_run' in config_dict:
-            assert all(key in valid_before for key in config_dict['before_run'])
+                       for fac, fac_d in job['factors'].items()\
+                       if fac_d.get('substitute', False)), msg

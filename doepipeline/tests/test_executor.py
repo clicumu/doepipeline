@@ -86,7 +86,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
 
         # Monkey patch out screen-run to simply return output.
         output = dict()
-        def mock_run_in_screens(steps, index, envs):
+        def mock_run_in_screens(steps, index, envs, collect):
             output['steps'] = steps
             output['index'] = index
 
@@ -164,7 +164,7 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
                 else:
                     script = base_script.format(script=self.pipeline[job][step])
 
-                script += ' &'
+                script += ' & echo $!'
                 expected_scripts += [
                     script,
                     'screen -d'

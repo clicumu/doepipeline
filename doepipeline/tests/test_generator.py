@@ -14,7 +14,6 @@ class BaseGeneratorTestCase(unittest.TestCase):
             'script': './script_a',
             'factors': {
                 'FactorA': {
-                    'factor_name': 'Factor A',
                     'script_option': '--option'
                 }
             }
@@ -24,13 +23,36 @@ class BaseGeneratorTestCase(unittest.TestCase):
             'script': './script_b {% FactorB %}',
             'factors': {
                 'FactorB': {
-                    'factor_name': 'Factor B',
                     'substitute': True
                 }
             }
         }
+        self.design_spec = {
+            'type': 'CCC',
+            'factors': {
+                'FactorA': {
+                    'min': 0,
+                    'max': 1,
+                    'low_init': 0,
+                    'high_init': .2
+                },
+                'FactorB': {
+                    'min': 0,
+                    'max': 1,
+                    'low_init': .1,
+                    'high_init': .3
+                }
+            },
+            'responses': {
+                'ResponseA': 'maximize'
+            }
+        }
+
+        self.collect = './a_collection_script'
 
         self.config = {
+            'collect_results': self.collect,
+            'design': self.design_spec,
             'before_run': {'environment_variables': {'MYPATH': '~/a/path'}},
             'pipeline': ['ScriptWithOptions', 'ScriptWithSub'],
             'ScriptWithOptions': self.script_w_opt,
@@ -45,8 +67,8 @@ class BaseGeneratorTestCase(unittest.TestCase):
             ['A', .1, .2],
             ['B', .3, .4]
         ]
-        self.design = pd.DataFrame(
-                values, columns=['Exp Id', 'Factor A', 'Factor B']
+        self.dummy_design = pd.DataFrame(
+                values, columns=['Exp Id', 'FactorA', 'FactorB']
         )
 
     def tearDown(self):
@@ -85,11 +107,24 @@ class TestMakePipeline(BaseGeneratorTestCase):
         self.scripts2 = ['./script_a --option 0.3', './script_b 0.4']
 
     def test_render_experiments_without_id_column(self):
-        pipeline_collection = self.runner.new_pipeline_collection(self.design)
-        self.assertDictEqual({'0': self.scripts1, '1': self.scripts2,
-                              'ENV_VARIABLES': self.env_vars}, pipeline_collection)
+        pipeline_collection = self.runner.new_pipeline_collection(self.dummy_design)
+        expected = {
+            '0': self.scripts1, '1': self.scripts2,
+            'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
+            'COLLECT_RESULTS': self.config['collect_results']
+        }
+        self.assertDictEqual(expected,
+                             pipeline_collection)
 
     def test_render_experiments_with_id_column(self):
-        new_collection = self.runner.new_pipeline_collection(self.design, 'Exp Id')
-        self.assertDictEqual({'A': self.scripts1, 'B': self.scripts2,
-                              'ENV_VARIABLES': self.env_vars}, new_collection)
+        new_collection = self.runner.new_pipeline_collection(self.dummy_design, 'Exp Id')
+        self.maxDiff = None
+        expected = {
+            'A': self.scripts1, 'B': self.scripts2,
+            'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
+            'COLLECT_RESULTS': self.config['collect_results']
+        }
+        self.assertDictEqual(
+            expected,
+             new_collection)
+

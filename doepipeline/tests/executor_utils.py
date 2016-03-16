@@ -21,12 +21,13 @@ class MockBaseExecutor(BasePipelineExecutor):
         super(MockBaseExecutor, self).__init__(*args, **kwargs)
         self.scripts = list()
 
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, collect):
         pass
 
     def execute_command(self, command, watch=False, **kwargs):
         super(MockBaseExecutor, self).execute_command(command, watch, **kwargs)
         self.scripts.append(command)
+        return 'in', 'out', 'error'
 
     def poll_jobs(self):
         return self.JOB_FINISHED, ''
@@ -43,6 +44,8 @@ class MockScreenExecutor(ScreenExecutorMixin, MockBaseExecutor):
 class ExecutorTestCase(unittest.TestCase):
 
     executor_class = MockBaseExecutor
+    init_args = tuple()
+    init_kwargs = dict()
 
     def setUp(self):
         script_one = {
@@ -63,10 +66,33 @@ class ExecutorTestCase(unittest.TestCase):
                 }
             }
         }
+        design_spec = {
+            'type': 'CCC',
+            'factors': {
+                'FactorA': {
+                    'min': 0,
+                    'max': 1,
+                    'low_init': 0,
+                    'high_init': .2
+                },
+                'FactorB': {
+                    'min': 0,
+                    'max': 1,
+                    'low_init': .1,
+                    'high_init': .3
+                }
+            },
+            'responses': {
+                'ResponseA': 'maximize'
+            }
+        }
 
         self.env_vars = {'MYPATH': '~/a/path'}
         before = {'environment_variables': self.env_vars}
+        self.collect_script = './collect'
         self.config = {
+            'design': design_spec,
+            'collect_results': self.collect_script,
             'before_run': before,
             'pipeline': ['ScriptOne', 'ScriptTwo'],
             'ScriptOne': script_one,
@@ -75,12 +101,12 @@ class ExecutorTestCase(unittest.TestCase):
         self.design = pd.DataFrame([
             ['One', .1, .2],
             ['Two', .3, .4]
-        ], columns=['Exp Id', 'Factor A', 'Factor B'])
+        ], columns=['Exp Id', 'FactorA', 'FactorB'])
         self.generator = PipelineGenerator(copy.deepcopy(self.config))
         self.pipeline = self.generator.new_pipeline_collection(self.design,'Exp Id')
 
     def test_execute_commands_returns_tuple(self):
-        executor = self.executor_class()
+        executor = self.executor_class(*self.init_args, **self.init_kwargs)
         result = executor.execute_command('test')
         self.assertIsInstance(result, Sequence)
         self.assertEqual(len(result), 3)

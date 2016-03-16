@@ -113,7 +113,6 @@ class BasePipelineExecutor(object):
         except AssertionError, e:
             raise ValueError(e.message)
 
-
     @abc.abstractmethod
     def poll_jobs(self):
         """ Abstract method.
@@ -138,6 +137,15 @@ class BasePipelineExecutor(object):
         :param pipeline_collection:
         :return:
         """
+        # Initialization..
+        pipeline_length = len(next(iter(pipeline_collection.values())))
+        experiment_index = list()
+        job_steps = [[] for _ in range(pipeline_length)]
+        env_variables = pipeline_collection['ENV_VARIABLES']
+        setup = pipeline_collection['SETUP_SCRIPTS']
+        collect_script = pipeline_collection['COLLECT_RESULTS']
+        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'COLLECT_RESULTS']
+
         # Move to working-directory
         try:
             self._cd(self.workdir)
@@ -146,12 +154,10 @@ class BasePipelineExecutor(object):
             self._mkdir(self.workdir)
             self._cd(self.workdir)
 
-        # Initialization..
-        pipeline_length = len(next(iter(pipeline_collection.values())))
-        experiment_index = list()
-        job_steps = [[] for _ in range(pipeline_length)]
-        env_variables = pipeline_collection.get('ENV_VARIABLES', None)
-        reserved = ['ENV_VARIABLES']
+        # Run setup-scripts in work-dir.
+        if setup is not None:
+            for script in setup:
+                self.execute_command(script)
 
         log.info('Creating job directories.')
         for job_name, scripts in pipeline_collection.items():
@@ -166,10 +172,10 @@ class BasePipelineExecutor(object):
             for i, script in enumerate(scripts):
                 job_steps[i].append(script)
 
-        self.run_jobs(job_steps, experiment_index, env_variables)
+        self.run_jobs(job_steps, experiment_index, env_variables, collect_script)
 
     @abc.abstractmethod
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, collect_script):
         """ Abstract method.
 
         :param list[list] job_steps:
