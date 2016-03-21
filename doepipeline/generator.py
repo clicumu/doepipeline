@@ -2,6 +2,7 @@ import yaml
 import re
 import collections
 
+from doepipeline.designer import BaseExperimentDesigner, ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
 
 
@@ -44,6 +45,16 @@ class PipelineGenerator:
                 raise ValueError('yaml_config must be path or file-handle')
 
         return cls(config, *args, **kwargs)
+
+    def new_designer_from_config(self, designer_class=None, *args, **kwargs):
+        if designer_class is None:
+            designer_class = ExperimentDesigner
+
+        factors = self._config['design']['factors']
+        design_type = self._config['design']['type']
+        responses = self._config['design']['responses']
+
+        return designer_class(factors, design_type, responses, *args, **kwargs)
 
     def new_pipeline_collection(self, experiment_design, exp_id_column=None):
         """ Given experiment, create script-strings to execute.
@@ -94,7 +105,7 @@ class PipelineGenerator:
 
         pipeline_collection['ENV_VARIABLES'] = self._env_variables
         pipeline_collection['SETUP_SCRIPTS'] = self._setup_scripts
-        pipeline_collection['COLLECT_RESULTS'] = self._config['collect_results']
+        pipeline_collection['RESULTS_FILE'] = self._config['results_file']
 
         return pipeline_collection
 
@@ -106,11 +117,11 @@ class PipelineGenerator:
         :param config_dict: Pipeline configuration.
         :raises: AssertionError
         """
-        reserved_terms = 'before_run', 'pipeline', 'design', 'collect_results'
+        reserved_terms = 'before_run', 'pipeline', 'design', 'results_file'
         valid_before = 'environment_variables', 'scripts'
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'
-        assert 'collect_results', 'collect_results missing'
+        assert 'results_file', 'collect_results missing'
 
         job_names = config_dict['pipeline']
         assert isinstance(job_names, list), 'pipeline must be listing'
@@ -170,8 +181,9 @@ class PipelineGenerator:
                    for job in job_w_factors), 'job factors must be specified in design'
 
         # Check factors either script_option or substituted.
-        assert all(any(['script_option' in factor, 'substitute' in factor])\
-                       for factor in job['factors'].values() for job in job_w_factors),\
+        for job in job_w_factors:
+            assert any(['script_option' in factor, 'substitute' in factor]\
+                       for factor in job['factors']),\
             'factors must be added as script option or substituted'
 
         # Get jobs with substitution

@@ -48,10 +48,10 @@ class BaseGeneratorTestCase(unittest.TestCase):
             }
         }
 
-        self.collect = './a_collection_script'
+        self.outfile = 'my_results.txt'
 
         self.config = {
-            'collect_results': self.collect,
+            'results_file': self.outfile,
             'design': self.design_spec,
             'before_run': {'environment_variables': {'MYPATH': '~/a/path'}},
             'pipeline': ['ScriptWithOptions', 'ScriptWithSub'],
@@ -96,6 +96,7 @@ class TestCreate(BaseGeneratorTestCase):
         self.assertRaises(ValueError,
                           lambda: PipelineGenerator(bad_config))
 
+
 class TestMakePipeline(BaseGeneratorTestCase):
 
     def setUp(self):
@@ -111,7 +112,7 @@ class TestMakePipeline(BaseGeneratorTestCase):
         expected = {
             '0': self.scripts1, '1': self.scripts2,
             'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
-            'COLLECT_RESULTS': self.config['collect_results']
+            'RESULTS_FILE': self.config['results_file']
         }
         self.assertDictEqual(expected,
                              pipeline_collection)
@@ -122,7 +123,7 @@ class TestMakePipeline(BaseGeneratorTestCase):
         expected = {
             'A': self.scripts1, 'B': self.scripts2,
             'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
-            'COLLECT_RESULTS': self.config['collect_results']
+            'RESULTS_FILE': self.config['results_file']
         }
         self.assertDictEqual(
             expected,

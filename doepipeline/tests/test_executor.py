@@ -86,7 +86,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
 
         # Monkey patch out screen-run to simply return output.
         output = dict()
-        def mock_run_in_screens(steps, index, envs, collect):
+        def mock_run_in_screens(steps, index, envs):
             output['steps'] = steps
             output['index'] = index
 

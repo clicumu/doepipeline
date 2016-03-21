@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import contextmanager
 from doepipeline.executor.base import BasePipelineExecutor, PipelineRunFailed
 
@@ -23,8 +24,13 @@ class ScreenExecutorMixin(BasePipelineExecutor):
         """
         log.info('Run jobs in parallel using screens')
         base_command = self.base_command
-        if not self.base_command.endswith('&'):
-            base_command += ' &'
+
+        # Look for correct ending.
+        match = re.search(r'&\s*((?!$)\s*echo\s*\$!$|$)', base_command)
+        if match is None:
+            base_command += ' & echo $!'
+        elif match.group().strip() == '&':
+            base_command += ' echo $!'
 
         for job_name in experiment_index:
             log.debug('Setting up screen: {}'.format(job_name))
@@ -62,6 +68,40 @@ class ScreenExecutorMixin(BasePipelineExecutor):
             except PipelineRunFailed:
                 raise
 
+    def poll_jobs(self):
+        """ Check job statuses in each screen.
+
+        Jobs are checked by executing :code:`ps -a | grep [pid]` in
+        each screen for each process-ID. If the resulting string contains
+        "Done" the job is considered finished. If there is no resulting
+        string or the resulting string contains "Exit" the job is considered
+        failed. Else it is considered running.
+
+        :return: status, message
+        :rtype: tuple
+        """
+        still_running = list()
+        for job_name, pid in self.running_jobs.items():
+            cmd = 'ps -a | grep {pid}'.format(pid=pid)
+
+            with self.screen(job_name):
+                __, stdout, __ = self.execute_command(cmd)
+
+            status = stdout.read().strip()
+            if 'done' in status.lower():
+                log.info('{0} finished'.format(job_name))
+                self.running_jobs.pop(job_name)
+            elif not status or 'exit' in status.lower():
+                return self.JOB_FAILED, '{0} has failed'.format(job_name)
+            else:
+                still_running.append(job_name)
+
+        if still_running:
+            msg = '{0} still running'.format(', '.join(still_running))
+            return self.JOB_RUNNING, msg
+        else:
+            return self.JOB_FINISHED, 'no jobs running.'
+
     @contextmanager
     def screen(self, screen_name):
         """ Context-manager to run commands within Linux-screens.
@@ -86,6 +126,38 @@ class ScreenExecutorMixin(BasePipelineExecutor):
 
 
 class BatchExecutorMixin(BasePipelineExecutor):
+
+    def poll_jobs(self):
+        """ Check job statuses.
+
+        Jobs are checked by executing :code:`ps -a | grep [pid]` for
+        each process-ID. If the resulting string contains "Done" the
+        job is considered finished. If there is no resulting string
+        or the resulting string contains "Exit" the job is considered
+        failed. Else it is considered running.
+
+        :return: status, message
+        :rtype: tuple
+        """
+        raise NotImplementedError
+        # still_running = list()
+        # for job_name, pid in self.running_jobs.items():
+        #     cmd = 'ps -a | grep {pid}'.format(pid=pid)
+        #     __, stdout, __ = self.execute_command(cmd)
+        #     status = stdout.read().strip()
+        #     if 'done' in status.lower():
+        #         log.info('{0} finished'.format(job_name))
+        #         self.running_jobs.pop(job_name)
+        #     elif not status or 'exit' in status.lower():
+        #         return self.JOB_FAILED, '{0} has failed'.format(job_name)
+        #     else:
+        #         still_running.append(job_name)
+        #
+        # if still_running:
+        #     msg = '{0} still running'.format(', '.join(still_running))
+        #     return self.JOB_RUNNING, msg
+        # else:
+        #     return self.JOB_FINISHED, 'no jobs running.'
 
     def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Run the collection of jobs in parallel using batch execution.
@@ -125,7 +197,7 @@ class BatchExecutorMixin(BasePipelineExecutor):
         if env_variables is not None:
             self._set_env_variables(env_variables)
 
-        base_command= 'cd {job_dir} && {{log_script}}' + base + ' && cd .. &'
+        base_command= 'cd {job_dir} && {{log_script}}' + base + ' && cd .. & echo $! &'
 
         for i, step in enumerate(job_steps, start=1):
             commands = list()
@@ -150,7 +222,7 @@ class BatchExecutorMixin(BasePipelineExecutor):
             commands.append('wait')
             batch_command = ' '.join(commands)
             self.execute_command(batch_command, watch=True,
-                                 job_name='batch_{}'.format(i))
+                                 job_name=experiment_index)
 
             try:
                 self._wait_until_current_jobs_are_finished()

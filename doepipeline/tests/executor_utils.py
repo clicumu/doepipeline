@@ -21,7 +21,7 @@ class MockBaseExecutor(BasePipelineExecutor):
         super(MockBaseExecutor, self).__init__(*args, **kwargs)
         self.scripts = list()
 
-    def run_jobs(self, job_steps, experiment_index, env_variables, collect):
+    def run_jobs(self, job_steps, experiment_index, env_variables):
         pass
 
     def execute_command(self, command, watch=False, **kwargs):
@@ -89,10 +89,10 @@ class ExecutorTestCase(unittest.TestCase):
 
         self.env_vars = {'MYPATH': '~/a/path'}
         before = {'environment_variables': self.env_vars}
-        self.collect_script = './collect'
+        self.outfile = 'my_results.txt'
         self.config = {
             'design': design_spec,
-            'collect_results': self.collect_script,
+            'results_file': self.outfile,
             'before_run': before,
             'pipeline': ['ScriptOne', 'ScriptTwo'],
             'ScriptOne': script_one,

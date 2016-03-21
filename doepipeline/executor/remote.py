@@ -5,6 +5,7 @@ import paramiko
 import socket
 import logging
 import time
+import re
 from contextlib import contextmanager
 from doepipeline.executor.base import BasePipelineExecutor, CommandError
 from doepipeline.executor.mixins import ScreenExecutorMixin, BatchExecutorMixin
@@ -106,12 +107,44 @@ class BaseSSHExecutor(BasePipelineExecutor):
         self._client = None
 
     def execute_command(self, command, watch=False, **kwargs):
+        """ Execute script over SSH.
+
+        :param str command: Command to execute.
+        :param bool watch: If True, monitor process.
+        :param kwargs: Keyword arguments-
+        :return: stdin, stdout, stderr
+        :rtype: tuple[str]
+        """
         super(BaseSSHExecutor, self).execute_command(command, watch, **kwargs)
+        if watch:
+            try:
+                assert command.startswith('nohup'),\
+                    'If watch, command must be nohupped'
+                assert command.endswith('echo $!'),\
+                    'If watch, pid must be echoed using "echo $!"'
+                # Crude matching for redirect of stdout. Probably should be
+                # more specific since it matches "2>&1" as well as
+                # "script > logfile" or "script >/dev/null".
+                assert re.search(r'>\s?\S*', command) is not None,\
+                    ('If watch, stdout must be redirected. '
+                     'pid-check hangs otherwise.')
+            except AssertionError, e:
+                raise ValueError(e.message)
+
         try:
             with self.connection(disconnect=watch):
-                self._client.exec_command(command)
+                stdin, stdout, stderr = self._client.exec_command(command)
         except paramiko.SSHException, e:
             raise CommandError(e.message)
+        else:
+            if watch:
+                pids = [line.strip() for line in stdout.readlines()]
+                if len(pids) > 1:
+                    self.running_jobs = zip(kwargs['job_name'], pids)
+                else:
+                    self.running_jobs[kwargs['job_name']] = pids[0]
+
+        return stdin, stdout, stderr
 
     @contextmanager
     def connection(self, disconnect=True):
@@ -119,17 +152,18 @@ class BaseSSHExecutor(BasePipelineExecutor):
 
         :param bool disconnect: If True, disconnect after call.
         """
-        try:
-            yield
-        except socket.error:
-            log.info('Connection lost. Reconnecting...')
+        transport = self._client.get_transport() \
+            if self._client is not None else None
+
+        if transport is None or not transport.is_active():
             try:
                 self.connect()
             except ConnectionFailed:
                 raise
             else:
                 log.info('Reconnection succeeded.')
-                yield
+        try:
+            yield
         finally:
             if disconnect:
                 self.disconnect()

@@ -13,7 +13,7 @@ Exceptions:
 import abc
 import logging
 import time
-from collections import Sequence
+from collections import Sequence, OrderedDict
 
 from doepipeline import utils
 
@@ -143,8 +143,11 @@ class BasePipelineExecutor(object):
         job_steps = [[] for _ in range(pipeline_length)]
         env_variables = pipeline_collection['ENV_VARIABLES']
         setup = pipeline_collection['SETUP_SCRIPTS']
-        collect_script = pipeline_collection['COLLECT_RESULTS']
-        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'COLLECT_RESULTS']
+        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE']
+
+        _items = pipeline_collection.items()
+        pipeline_scripts = OrderedDict([(key, value) for key, value in _items\
+                                        if key not in reserved])
 
         # Move to working-directory
         try:
@@ -160,7 +163,7 @@ class BasePipelineExecutor(object):
                 self.execute_command(script)
 
         log.info('Creating job directories.')
-        for job_name, scripts in pipeline_collection.items():
+        for job_name, scripts in pipeline_scripts.items():
             if job_name in reserved:
                 # Don't treat special names as jobs.
                 continue
@@ -172,10 +175,10 @@ class BasePipelineExecutor(object):
             for i, script in enumerate(scripts):
                 job_steps[i].append(script)
 
-        self.run_jobs(job_steps, experiment_index, env_variables, collect_script)
+        self.run_jobs(job_steps, experiment_index, env_variables)
 
     @abc.abstractmethod
-    def run_jobs(self, job_steps, experiment_index, env_variables, collect_script):
+    def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Abstract method.
 
         :param list[list] job_steps:

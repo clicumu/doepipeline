@@ -3,6 +3,7 @@ import socket
 import paramiko
 
 from doepipeline.executor.remote import BaseSSHExecutor, ConnectionFailed
+from doepipeline.executor.base import CommandError
 from doepipeline.tests.executor_utils import ExecutorTestCase
 
 
@@ -26,6 +27,14 @@ class BaseSSHTestCase(ExecutorTestCase):
     host = credentials['host']
     connect_kwargs = {key: value for key, value in credentials.items()
                       if key != 'host'}
+
+    executor_class = MockSSHExecutor
+    init_args = (credentials, )
+
+    @mock.patch('paramiko.SSHClient')
+    def test_execute_commands_returns_tuple(self, mock_client):
+        mock_client.return_value.exec_command.return_value = 'in', 'out', 'err'
+        super(BaseSSHTestCase, self).test_execute_commands_returns_tuple()
 
 
 class TestSSHExecutorSetup(BaseSSHTestCase):
@@ -102,7 +111,7 @@ class TestSSHExecutorConnect(BaseSSHTestCase):
         self.assertFalse(mock_sleep.called)
 
 
-class TestSSHExecutorReconnect(BaseSSHExecutor):
+class TestSSHExecutorReconnect(BaseSSHTestCase):
 
     @mock.patch('time.sleep')
     @mock.patch('paramiko.SSHClient.connect')
@@ -151,13 +160,27 @@ class TestSSHExecutorReconnect(BaseSSHExecutor):
         self.assertRaises(ConnectionFailed, executor.connect)
         self.assertEqual(mock_sleep.call_count, 2 * n)
 
-    @mock.patch('paramiko.SSHClient.close')
-    @mock.patch('paramiko.SSHClient.connect')
-    def test_execution_connects_if_disconnected(self, mock_connect, mock_close):
+    @mock.patch('paramiko.SSHClient')
+    def test_execution_connects_if_disconnected(self, mock_client):
+        mock_client.return_value.exec_command.return_value = 'in', 'out', 'err'
         executor = MockSSHExecutor(self.credentials, reconnect=False)
+
+        def set_client():
+            executor._client = mock_client()
+
+        executor.connect = mock.MagicMock()
+        executor.connect.side_effect = set_client
+        self.assertFalse(executor.connect.called)
         executor.execute_command('ls')
+        self.assertTrue(executor.connect.called)
 
+    @mock.patch('paramiko.SSHClient.connect')
+    def test_execution_autoconnect_raises_ConnectionFailed_on_fail(self, mock_connect):
+        executor = MockSSHExecutor(self.credentials)
+        error = paramiko.AuthenticationException(mock.Mock(), 'auth error')
+        mock_connect.side_effect = error
 
+        self.assertRaises(ConnectionFailed, executor.execute_command, 'ls')
 
 
 class TestSSHExecutorDisconnect(BaseSSHTestCase):
@@ -170,3 +193,36 @@ class TestSSHExecutorDisconnect(BaseSSHTestCase):
 
         executor.disconnect()
         self.assertTrue(mock_close.called)
+
+    @mock.patch('paramiko.SSHClient')
+    def test_disconnect_after_call_if_set_to_watch(self, mock_client):
+        mock_file = mock.MagicMock()
+        mock_file.readlines.return_value = ['jobname']
+        mock_client.return_value.exec_command.return_value = 'in', mock_file, 'err'
+        executor = MockSSHExecutor(self.credentials)
+        executor.disconnect = mock.MagicMock()
+
+        self.assertFalse(executor.disconnect.called)
+        executor.execute_command('nohup ls >/dev/null & echo $!', watch=True, job_name='test')
+        self.assertTrue(executor.disconnect.called)
+
+    @mock.patch('paramiko.SSHClient')
+    def test_disconnect_is_not_called_when_not_watching(self, mock_client):
+        mock_client.return_value.exec_command.return_value = 'in', 'out', 'err'
+        executor = MockSSHExecutor(self.credentials)
+        executor.disconnect = mock.MagicMock()
+
+        self.assertFalse(executor.disconnect.called)
+        executor.execute_command('ls')
+        self.assertFalse(executor.disconnect.called)
+
+
+class TestSSHExecutorExecute(BaseSSHTestCase):
+
+    @mock.patch('paramiko.SSHClient')
+    def test_raises_CommandError_on_failed_ssh(self, mock_client):
+        error = paramiko.SSHException(mock.Mock())
+        mock_client.return_value.exec_command.side_effect = error
+
+        executor = MockSSHExecutor(self.credentials)
+        self.assertRaises(CommandError, executor.execute_command, 'ls')
