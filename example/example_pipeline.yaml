@@ -1,5 +1,5 @@
 before_run:  # Optional setup.
-    environment_variabels:
+    environment_variables:
         # Variables which will be set in the execution environment of
         # the pipeline run.
         MY_DIR: ~/my/dir/
@@ -28,25 +28,23 @@ design:
             max: 4
             low_init: 1
             high_init: 2
-            type: qualititative
         FactorC:
-            min: 100
-            max: 200
             low_init: 140
             high_init: 160
 
-      responses:  # One or more.
-          ResponseA: maximize
-          ResponseB: minimize
+    responses:  # One or more.
+        ResponseA: maximize
+        ResponseB: minimize
 
-# A script which calculates "experiment responses" from the pipeline results
-# must be provided, since there is no way to provide that beforehand.
-collect_results: ./some_script
+# File where final results are dumped. One file per "experiment" will be
+# produced.
+results_file: my_results.txt
 
 pipeline:
     # Specifies order of jobs. These names must match the job-names below.
     - MyFirstJob
     - MySecondJob
+    - MyThirdJob
 
 MyFirstJob:
     # The script can be multi-line and has access to environment
@@ -70,3 +68,6 @@ MySecondJob:
             # If substitute is given (and true), the script's {% FactorC %}
             # will be replaced with the current factor value.
             substitute: true
+
+MyThirdJob:
+    script: python make_output.py -o {% results_file %}

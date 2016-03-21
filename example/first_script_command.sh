@@ -23,4 +23,4 @@ esac
 shift
 done
 
-echo "Factor A: $FACTOR_A, Factor B: $FACTOR_B" > ${OUTPUT}
+echo "Factor A: $FACTOR_A, Factor B: $FACTOR_B" > ${OUTPUT}/output.txt
