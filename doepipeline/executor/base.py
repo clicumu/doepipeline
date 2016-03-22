@@ -13,6 +13,7 @@ Exceptions:
 import abc
 import logging
 import time
+import platform
 from collections import Sequence, OrderedDict
 
 from doepipeline import utils
@@ -87,7 +88,7 @@ class BasePipelineExecutor(object):
         self.running_jobs = dict()
 
     @abc.abstractmethod
-    def execute_command(self, command, watch=False, **kwargs):
+    def execute_command(self, command, watch=False, wait=False, **kwargs):
         """ Extend to execute the given command in current execution
         environment and returns echoed stdin, stdout, stderr.
 
@@ -104,6 +105,7 @@ class BasePipelineExecutor(object):
             assert isinstance(command, str) and command.strip(),\
                 'command must be a string'
             assert isinstance(watch, bool), 'watch must be boolean'
+            assert isinstance(wait, bool), 'wait must be boolean'
             if watch:
                 assert 'job_name' in kwargs,\
                     'if watch is True, job_name must be given'
@@ -202,6 +204,13 @@ class BasePipelineExecutor(object):
 
     def _cd(self, dir):
         self.execute_command('cd {}'.format(dir))
+
+    def _touch(self, file_name):
+        if platform.system() == 'Windows':
+            command = 'type NUL >> {file}'
+        else:
+            command = 'touch {file}'
+        self.execute_command(command.format(file=file_name))
 
     def _mkdir(self, dir):
         self.execute_command('mkdir {}'.format(dir))
