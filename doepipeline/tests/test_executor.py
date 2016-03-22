@@ -128,7 +128,8 @@ class TestBaseExecutorExecutions(ExecutorTestCase):
 
 class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
-    def make_expected_scripts(self, workdir, base_script, executor, use_log=False):
+    def make_expected_scripts(self, workdir, base_script, executor,
+                              use_log=False, system='Windows'):
         job1, job2 = self.design['Exp Id'].tolist()
 
         # Run-setup.
@@ -158,7 +159,11 @@ class TestBaseExecutorRunsScreens(ExecutorTestCase):
 
                 if use_log:
                     log_file = executor.base_log.format(name=job, i=step + 1)
-                    expected_scripts += ['touch {}'.format(log_file)]
+
+                    if system == 'Windows':
+                        expected_scripts += ['type NUL >> {}'.format(log_file)]
+                    else:
+                        expected_scripts += ['touch {}'.format(log_file)]
                     script = base_script.format(script=self.pipeline[job][step],
                                                 logfile=log_file)
                 else:

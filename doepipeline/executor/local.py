@@ -2,9 +2,10 @@
 This module contains executors for simple pipeline execution in
 a Linux-shell.
 """
-from .base import BasePipelineExecutor
-from .mixins import BatchExecutorMixin, ScreenExecutorMixin
 import subprocess
+
+from .base import BasePipelineExecutor, CommandError
+from .mixins import BatchExecutorMixin, ScreenExecutorMixin
 
 
 class LocalPipelineExecutor(BatchExecutorMixin,
@@ -44,7 +45,7 @@ class LocalPipelineExecutor(BatchExecutorMixin,
         else:
             return self.JOB_FINISHED, 'no jobs running.'
 
-    def execute_command(self, command, watch=False, **kwargs):
+    def execute_command(self, command, watch=False, wait=False, **kwargs):
         """ Execute given command by executing it in subprocess.
 
         Calls are made using `subprocess`-module like::
@@ -57,6 +58,18 @@ class LocalPipelineExecutor(BatchExecutorMixin,
         """
         super(LocalPipelineExecutor, self).execute_command(command, watch,
                                                            **kwargs)
-        process = subprocess.Popen(command, shell=True)
         if watch:
+            try:
+                process = subprocess.Popen(command, shell=True)
+            except OSError, e:
+                raise CommandError(e.message)
             self.running_jobs[kwargs.pop('job_name')] = process
+
+            if wait:
+                process.wait()
+        else:
+            try:
+                # Note: This will wait until execution finished.
+                subprocess.call(command)
+            except OSError, e:
+                raise CommandError(e.message)
