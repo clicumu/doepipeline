@@ -25,8 +25,10 @@ class PipelineGenerator:
         self._config = config
         self._current_iteration = 0
 
-        self._env_variables = config['before_run'].pop('environment_variables', None)
-        self._setup_scripts = config['before_run'].pop('scripts', None)
+        if config.get('before_run', False):
+            before = config['before_run']
+            self._env_variables = before.get('environment_variables', None)
+            self._setup_scripts = before.get('scripts', None)
 
         jobs = [config[job] for job in config['pipeline']]
         self._scripts_templates = [parse_job_to_template_string(job)
