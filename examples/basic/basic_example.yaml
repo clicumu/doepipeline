@@ -1,0 +1,57 @@
+design:
+    # Design type is case insensitive (Todo: docs with allowed designs).
+    type: BoxBehnken
+
+    factors:
+        # Factors are quantitiative unless specified otherwise. The factor
+        # names probably works with spaces as well (Todo: test that).
+        FactorA:
+            # Minimum value.
+            min: 0
+            # Maximum value.
+            max: 40
+            # Low initial value.
+            low_init: 0
+            # High initial value.
+            high_init: 20
+        FactorB:
+            min: 0
+            max: 4
+            low_init: 1
+            high_init: 2
+    responses:  # One or more.
+        ResponseA: maximize
+
+# File where final results are dumped. One file per "experiment" will be
+# produced.
+results_file: my_results.txt
+
+pipeline:
+    # Specifies order of jobs. These names must match the job-names below.
+    - MyFirstJob
+    - MySecondJob
+    - MyThirdJob
+
+MyFirstJob:
+    # The script can be multi-line and has access to environment
+    # variables set above.
+    script: >
+        echo "Second {% FactorA %}" > step_one.txt
+    factors:
+        # The factors must match factors in the design.
+        FactorA:
+            # If script_option is given, the current factor value will be
+            # added as a option to the job-script.
+            substitute: true
+
+MySecondJob:
+    script: >
+        echo "Second {% FactorB %}" > step_two.txt
+    factors:
+        FactorB:
+            # If substitute is given (and true), the script's {% FactorC %}
+            # will be replaced with the current factor value.
+            substitute: true
+
+MyThirdJob:
+    script: python make_output.py -o {% results_file %}

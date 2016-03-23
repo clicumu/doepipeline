@@ -243,5 +243,8 @@ class BasePipelineExecutor(object):
         self.execute_command('mkdir {}'.format(dir))
 
     def _set_env_variables(self, env_variables):
-        for name, value in env_variables.items():
-            self.execute_command('{}={}'.format(name, value))
+        if env_variables is None:
+            return
+        else:
+            for name, value in env_variables.items():
+                self.execute_command('{}={}'.format(name, value))

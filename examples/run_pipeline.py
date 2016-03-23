@@ -12,7 +12,7 @@ class ExampleDesigner(BaseExperimentDesigner):
         self.design = None
         np.random.seed(123456789)
 
-    def new_design_from_response(self, response):
+    def update_factors_from_response(self, response):
         self.design += 1
         return self.design
 
@@ -30,4 +30,4 @@ if __name__ == '__main__':
     pipeline = generator.new_pipeline_collection(design)
     executor = LocalPipelineExecutor()
     results = executor.run_pipeline_collection(pipeline)
-    design = designer.new_design_from_response(results)
+    design = designer.update_factors_from_response(results)

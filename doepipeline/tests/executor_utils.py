@@ -32,6 +32,9 @@ class MockBaseExecutor(BasePipelineExecutor):
     def poll_jobs(self):
         return self.JOB_FINISHED, ''
 
+    def read_file_contents(self, file_name):
+        return 'A,1\nB,2'
+
 
 class MockBatchExecutor(BatchExecutorMixin, MockBaseExecutor):
     pass

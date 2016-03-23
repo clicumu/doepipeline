@@ -5,7 +5,7 @@ a Linux-shell.
 import subprocess
 
 from .base import BasePipelineExecutor, CommandError
-from .mixins import BatchExecutorMixin, ScreenExecutorMixin
+from .mixins import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
 
 
 class LocalPipelineExecutor(BatchExecutorMixin,
@@ -73,3 +73,10 @@ class LocalPipelineExecutor(BatchExecutorMixin,
                 subprocess.call(command)
             except OSError as e:
                 raise CommandError(str(e))
+
+
+class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
+    """ Executor class which runs jobs serially locally. """
+
+    def execute_command(self, command, watch=False, wait=False, **kwargs):
+        subprocess.call(command)

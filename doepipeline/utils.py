@@ -1,11 +1,11 @@
 import re
 
 
-def parse_job_to_template_string(job):
+def parse_job_to_template_string(job, specials=None):
     """ Parse config job-entry into template string.
 
-    :param job: Config entry for job.
-    :type job: dict
+    :param dict job: Config entry for job.
+    :param dict specials: Non-job related substitution entries.
     :return: Parsed string
     :rtype: str
     """
@@ -24,6 +24,11 @@ def parse_job_to_template_string(job):
             if factor.get('substitute', False):
                 template_pattern = r'{%\s*' + key + r'\s*%}'
                 script = re.sub(template_pattern, '{' + key + '}', script)
+
+    specials = specials if specials is not None else {}
+    for key, value in specials.items():
+        template_pattern = r'{%\s*' + key + r'\s*%}'
+        script = re.sub(template_pattern, value, script)
 
     return script
 

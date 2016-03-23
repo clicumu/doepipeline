@@ -9,6 +9,10 @@ log = logging.getLogger(__name__)
 
 class SerialExecutorMixin(BasePipelineExecutor):
 
+    def __init__(self, *args, **kwargs):
+        super(SerialExecutorMixin, self).__init__(*args, **kwargs)
+        self.base_command = '{script} > {logfile}'
+
     def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Run all scripts using serial execution.
 

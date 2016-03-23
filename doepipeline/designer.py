@@ -1,6 +1,9 @@
 import abc
 import os
-
+import pyDOE
+import numpy as np
+import pandas as pd
+from collections import OrderedDict
 try:
     import pymoddeq
 except ImportError:
@@ -11,26 +14,112 @@ else:
     has_modde = True
 
 
+class Factor:
+
+    def __init__(self, factor_max, factor_min, factor_type):
+        self.max = factor_max
+        self.min = factor_min
+        self.type = factor_type
+        self.current_high = None
+        self.current_low = None
+
+    @property
+    def span(self):
+        return self.current_high - self.current_low
+
+    @property
+    def center(self):
+        return (self.current_high + self.current_low) / 2
+
+
+class UnsupportedDesign(Exception):
+    pass
+
+
 class BaseExperimentDesigner:
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, factors, design_type, responses):
-        self.factors = factors
+    def __init__(self, factors, design_type, responses, at_edges='distort'):
+        try:
+            assert at_edges in ('distort', 'shrink'),\
+                'unknown action at_edges: {0}'.format(at_edges)
+        except AssertionError as e:
+            raise ValueError(str(e))
+
+        self.factors = OrderedDict()
+        for factor_name, f_spec in factors.items():
+            has_neg = any([f_spec['high_init'] < 0, f_spec['low_init'] < 0])
+            f_min = f_spec.get('min', float('-inf') if has_neg else 0)
+            f_max = f_spec.get('max', float('inf'))
+            f_type = f_spec.get('type', 'quantitative')
+            factor = Factor(f_max, f_min, f_type)
+            factor.current_high = f_spec['high_init']
+            factor.current_low = f_spec['low_init']
+            self.factors[factor_name] = factor
+
         self.design_type = design_type
         self.responses = responses
+        self._edge_action = at_edges
 
     @abc.abstractmethod
-    def new_design(self, factor_settings=None):
+    def new_design(self):
         pass
 
     @abc.abstractmethod
-    def new_design_from_response(self, response):
+    def update_factors_from_response(self, response):
         pass
 
 
 class ExperimentDesigner(BaseExperimentDesigner):
-    pass
+
+    _matrix_designers = {
+        'fullfactorial2levels': pyDOE.ff2n,
+        'fullfactorial3levels': lambda n: pyDOE.fullfact([3] * n),
+        'placketburman': pyDOE.pbdesign,
+        'boxbehnken': lambda n: pyDOE.bbdesign(n, 1),
+        'ccc': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccc'),
+        'ccf': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccf'),
+        'cci': lambda n: pyDOE.ccdesign(n, (0, 1), face='cci'),
+    }
+
+    def __init__(self, *args, **kwargs):
+        super(ExperimentDesigner, self).__init__(*args, **kwargs)
+        n = len(self.factors)
+        try:
+            matrix_designer = self._matrix_designers[self.design_type.lower()]
+        except KeyError:
+            raise UnsupportedDesign(self.design_type)
+        else:
+            self._design_matrix = matrix_designer(n)
+
+    def new_design(self):
+        """
+
+        :return: Experimental design-sheet.
+        :rtype: pandas.DataFrame
+        """
+        mins = np.array([f.min for f in self.factors.values()])
+        maxes = np.array([f.max for f in self.factors.values()])
+        span = np.array([f.span for f in self.factors.values()])
+
+        centers = np.array([f.center for f in self.factors.values()]) / 2
+        factor_matrix = self._design_matrix * (span / 2) + centers
+
+        # Check if current settings are outside allowed design space.
+        if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
+            if self._edge_action == 'distort':
+                # Simply cap out-of-boundary values at mins and maxes.
+                capped_mins = np.maximum(factor_matrix, mins)
+                capped_mins_and_maxes = np.minimum(capped_mins, maxes)
+                factor_matrix = capped_mins_and_maxes
+            elif self._edge_action == 'shrink':
+                raise NotImplementedError
+
+        return pd.DataFrame(factor_matrix, columns=self.factors.keys())
+
+    def update_factors_from_response(self, response):
+        pass
 
 
 class _ModdeQDesigner(BaseExperimentDesigner):
@@ -147,10 +236,10 @@ class _ModdeQDesigner(BaseExperimentDesigner):
         # If connection fails, let exception bubble.
         self.modde = ModdeQRunner(modde_config)
 
-    def new_design(self, factor_settings=None):
+    def new_design(self):
         self._design = self.modde.get_experimental_setup()
 
-    def new_design_from_response(self, response):
+    def update_factors_from_response(self, response):
         pass
 
 
