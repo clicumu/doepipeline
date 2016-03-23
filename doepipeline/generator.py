@@ -19,8 +19,8 @@ class PipelineGenerator:
     def __init__(self, config):
         try:
             self._validate_config(config)
-        except AssertionError, e:
-            raise ValueError('Invalid config: ' + e.message)
+        except AssertionError as e:
+            raise ValueError('Invalid config: ' + str(e))
 
         self._config = config
         self._current_iteration = 0

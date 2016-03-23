@@ -36,8 +36,8 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 'connect_timeout must be positive number'
             assert isinstance(connection_attempts, int) and connection_attempts > 0,\
                 'connection_attempts must be positive integer'
-        except AssertionError, e:
-            raise ValueError(e.message)
+        except AssertionError as e:
+            raise ValueError(str(e))
 
         super(BaseSSHExecutor, self).__init__(*args, **kwargs)
         self._client = None
@@ -70,8 +70,8 @@ class BaseSSHExecutor(BasePipelineExecutor):
             assert isinstance(connect_timeout, (int, float)) \
                    and connect_timeout > 0,\
                 'connect_timeout must be positive number'
-        except AssertionError, e:
-            raise ValueError(e.message)
+        except AssertionError as e:
+            raise ValueError(str(e))
 
         for attempt in range(n_attempts):
             try:
@@ -81,11 +81,11 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 client.load_system_host_keys()
                 client.connect(self.host, **self.credentials)
             except (paramiko.BadHostKeyException,
-                    paramiko.AuthenticationException), e:
+                    paramiko.AuthenticationException) as e:
                 # If authentication fails or host key is wrong, fail
                 # immediately.
-                log.critical('Connection failed: ' + e.message)
-                raise ConnectionFailed(e.message)
+                log.critical('Connection failed: ' + str(e))
+                raise ConnectionFailed(str(e))
             except (paramiko.SSHException, socket.error):
                 # If SSH-connection fails, try to connect again.
                 msg = 'Connection attempt {i} failed, retrying...'
@@ -128,14 +128,14 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 assert re.search(r'>\s?\S*', command) is not None,\
                     ('If watch, stdout must be redirected. '
                      'pid-check hangs otherwise.')
-            except AssertionError, e:
-                raise ValueError(e.message)
+            except AssertionError as e:
+                raise ValueError(str(e))
 
         try:
             with self.connection(disconnect=watch):
                 stdin, stdout, stderr = self._client.exec_command(command)
-        except paramiko.SSHException, e:
-            raise CommandError(e.message)
+        except paramiko.SSHException as e:
+            raise CommandError(str(e))
         else:
             if watch:
                 pids = [line.strip() for line in stdout.readlines()]

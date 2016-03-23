@@ -1,4 +1,7 @@
-import mock
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 import socket
 import paramiko
 
@@ -14,6 +17,9 @@ class MockSSHExecutor(BaseSSHExecutor):
 
     def run_jobs(self, job_steps, experiment_index, env_variables):
         pass
+
+    def read_file_contents(self, filename):
+        return 'A,1\nB,2'
 
 
 class BaseSSHTestCase(ExecutorTestCase):

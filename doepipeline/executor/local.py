@@ -61,8 +61,8 @@ class LocalPipelineExecutor(BatchExecutorMixin,
         if watch:
             try:
                 process = subprocess.Popen(command, shell=True)
-            except OSError, e:
-                raise CommandError(e.message)
+            except OSError as e:
+                raise CommandError(str(e))
             self.running_jobs[kwargs.pop('job_name')] = process
 
             if wait:
@@ -71,5 +71,5 @@ class LocalPipelineExecutor(BatchExecutorMixin,
             try:
                 # Note: This will wait until execution finished.
                 subprocess.call(command)
-            except OSError, e:
-                raise CommandError(e.message)
+            except OSError as e:
+                raise CommandError(str(e))

@@ -1,5 +1,8 @@
 import types
-import mock
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 from doepipeline.executor.base import CommandError, PipelineRunFailed
 from doepipeline.executor import LocalPipelineExecutor

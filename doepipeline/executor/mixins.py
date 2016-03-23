@@ -1,9 +1,52 @@
 import logging
 import re
 from contextlib import contextmanager
-from doepipeline.executor.base import BasePipelineExecutor, PipelineRunFailed
+from doepipeline.executor.base import BasePipelineExecutor,\
+    PipelineRunFailed, CommandError
 
 log = logging.getLogger(__name__)
+
+
+class SerialExecutorMixin(BasePipelineExecutor):
+
+    def run_jobs(self, job_steps, experiment_index, env_variables):
+        """ Run all scripts using serial execution.
+
+        I.e. no parallelism.
+
+        :param job_steps: List of step-wise scripts.
+        :type job_steps: list[list]
+        :param experiment_index: List of job-names.
+        :type experiment_index: list[str]
+        :param env_variables: dictionary of environment variables to set.
+        :type env_variables: dict
+        """
+        self._set_env_variables(env_variables)
+
+        for i, step in enumerate(job_steps, start=1):
+            for script, job_name in zip(step, experiment_index):
+                log_file = self.base_log.format(name=job_name, i=i)
+                self._cd(job_name)
+                try:
+                    command = self.base_command.format(script=script)
+                except KeyError:
+                    has_log = True
+                    command = self.base_command.format(script=script,
+                                                       logfile=log_file)
+                else:
+                    has_log = False
+
+                if has_log:
+                    self._touch(log_file)
+
+                try:
+                    self.execute_command(command, wait=True, watch=True,
+                                         job_name=job_name)
+                except CommandError as e:
+                    raise PipelineRunFailed(str(e))
+
+    def poll_jobs(self):
+        """ Polling does nothing since commands are waited for """
 
 
 class ScreenExecutorMixin(BasePipelineExecutor):
@@ -21,6 +64,8 @@ class ScreenExecutorMixin(BasePipelineExecutor):
         :type job_steps: list[list]
         :param experiment_index: List of job-names.
         :type experiment_index: list[str]
+        :param env_variables: dictionary of environment variables to set.
+        :type env_variables: dict
         """
         log.info('Run jobs in parallel using screens')
         base_command = self.base_command
@@ -59,7 +104,7 @@ class ScreenExecutorMixin(BasePipelineExecutor):
                 # Execute script in screen.
                 with self.screen(job_name):
                     if has_log:
-                        self.execute_command('touch {log}'.format(log=log_file))
+                        self._touch(log_file)
                     log.debug('Executes: {}'.format(command))
                     self.execute_command(command, watch=True, job_name=job_name)
 
@@ -67,6 +112,7 @@ class ScreenExecutorMixin(BasePipelineExecutor):
                 self._wait_until_current_jobs_are_finished()
             except PipelineRunFailed:
                 raise
+
 
     def poll_jobs(self):
         """ Check job statuses in each screen.
