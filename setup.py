@@ -20,7 +20,7 @@ setup(
     author='Rickard Sjogren',
     author_email='rickard.sjogren@umu.se',
     license='MIT',
-    packages=['doepipeline'],
+    packages=['doepipeline', 'doepipeline.executor'],
     install_requires=[
         'pyyaml',
         'pandas',

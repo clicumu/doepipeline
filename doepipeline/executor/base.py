@@ -14,7 +14,9 @@ import abc
 import logging
 import time
 import platform
+from io import StringIO
 from collections import Sequence, OrderedDict
+import pandas as pd
 
 from doepipeline import utils
 
@@ -70,16 +72,16 @@ class BasePipelineExecutor(object):
         if base_command is not None:
             try:
                 self.base_command = utils.validate_command(base_command)
-            except AssertionError, e:
-                raise ValueError('invalid base-command: ' + e.message)
+            except AssertionError as e:
+                raise ValueError('invalid base-command: ' + str(e))
         else:
              self.base_command = 'nohup {script} > {logfile} 2>&1'
 
         if base_log is not None:
             try:
                 self.base_log = utils.validate_log_file(base_log)
-            except AssertionError, e:
-                raise ValueError('invalid base-log: ' + e.message)
+            except AssertionError as e:
+                raise ValueError('invalid base-log: ' + str(e))
         else:
             self.base_log = '{name}_step_{i}.log'
 
@@ -112,8 +114,8 @@ class BasePipelineExecutor(object):
                 assert isinstance(kwargs['job_name'], str)\
                        or isinstance(kwargs['job_name'], Sequence),\
                     'job_name must be str or Sequence'
-        except AssertionError, e:
-            raise ValueError(e.message)
+        except AssertionError as e:
+            raise ValueError(str(e))
 
     @abc.abstractmethod
     def poll_jobs(self):
@@ -137,7 +139,8 @@ class BasePipelineExecutor(object):
         """
 
         :param pipeline_collection:
-        :return:
+        :return: Pipeline results in a data-frame.
+        :rtype: pandas.DataFrame
         """
         # Initialization..
         pipeline_length = len(next(iter(pipeline_collection.values())))
@@ -179,6 +182,19 @@ class BasePipelineExecutor(object):
 
         self.run_jobs(job_steps, experiment_index, env_variables)
 
+        # Step into each work folder and collect pipeline results.
+        results = dict()
+        for job_name in experiment_index:
+            self._cd(job_name)
+            file_name = pipeline_collection['RESULTS_FILE']
+            contents = self.read_file_contents(file_name)
+            f_handle = StringIO(contents)
+            current_results = pd.Series.from_csv(f_handle)
+            results[job_name] = current_results
+            self._cd('..')
+
+        return pd.DataFrame(results).T
+
     @abc.abstractmethod
     def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Abstract method.
@@ -187,6 +203,17 @@ class BasePipelineExecutor(object):
         :param list[str] experiment_index:
         :param env_variables:
         :return:
+        """
+
+    @abc.abstractmethod
+    def read_file_contents(self, file_name):
+        """ Abstract method.
+
+        Override to specify how to read file contents.
+
+        :param str file_name: Path of file.
+        :return: File-contents
+        :rtype: str
         """
 
     def _wait_until_current_jobs_are_finished(self):
