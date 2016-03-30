@@ -1,14 +1,19 @@
 import re
+import os
 
 
-def parse_job_to_template_string(job, specials=None):
+def parse_job_to_template_string(job, specials=None, path_sep=None):
     """ Parse config job-entry into template string.
 
     :param dict job: Config entry for job.
     :param dict specials: Non-job related substitution entries.
+    :param str path_sep: Path-separator to use. Defaults to local separator.
     :return: Parsed string
     :rtype: str
     """
+    if path_sep is None:
+        path_sep = os.path.sep
+
     script = job['script'].strip()
 
     try:
@@ -27,11 +32,34 @@ def parse_job_to_template_string(job, specials=None):
 
     specials = specials if specials is not None else {}
     for key, value in specials.items():
-        template_pattern = r'{%\s*' + key + r'\s*%}'
-        script = re.sub(template_pattern, value, script)
-
+        if key.isupper():
+            script = substitute_path(script, key, value, path_sep)
+        else:
+            template_pattern = r'{%\s*' + key + r'\s*%}'
+            script = re.sub(template_pattern, value, script)
     return script
 
+
+def substitute_path(template_str, key, path, path_sep):
+    """
+
+    :param str template_str:
+    :param str key:
+    :param str path:
+    :param str path_sep:
+    :return: Formatted string.
+    """
+    template_pattern = r'{%\s*' + key + r'\s*(\S*)\s*%}'
+    match = re.search(template_pattern, template_str)
+
+    if match is not None:
+        ending = match.groups()[0]
+        full_path = path_sep.join([path, ending])
+        result = re.sub(template_pattern, full_path, template_str)
+    else:
+        result = template_str
+
+    return result
 
 def validate_command(command):
     """ Validate command-string.
