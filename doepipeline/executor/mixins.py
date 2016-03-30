@@ -9,9 +9,13 @@ log = logging.getLogger(__name__)
 
 class SerialExecutorMixin(BasePipelineExecutor):
 
-    def __init__(self, *args, **kwargs):
-        super(SerialExecutorMixin, self).__init__(*args, **kwargs)
-        self.base_command = '{script} > {logfile}'
+    def __init__(self, *args, base_command=None, **kwargs):
+        if base_command is None:
+            base_command = '{script} > {logfile}'
+        super(SerialExecutorMixin, self).__init__(*args,
+                                                  base_command=base_command,
+                                                  **kwargs)
+
 
     def run_jobs(self, job_steps, experiment_index, env_variables):
         """ Run all scripts using serial execution.
@@ -48,6 +52,8 @@ class SerialExecutorMixin(BasePipelineExecutor):
                                          job_name=job_name)
                 except CommandError as e:
                     raise PipelineRunFailed(str(e))
+
+                self._cd('..')
 
     def poll_jobs(self):
         """ Polling does nothing since commands are waited for """
