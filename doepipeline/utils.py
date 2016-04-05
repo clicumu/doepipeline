@@ -55,11 +55,12 @@ def substitute_path(template_str, key, path, path_sep):
     if match is not None:
         ending = match.groups()[0]
         full_path = path_sep.join([path, ending])
-        result = re.sub(template_pattern, full_path, template_str)
+        result = template_str.replace(match.group(), full_path)
     else:
         result = template_str
 
     return result
+
 
 def validate_command(command):
     """ Validate command-string.

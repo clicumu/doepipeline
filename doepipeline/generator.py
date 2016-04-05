@@ -1,6 +1,7 @@
 import yaml
 import re
 import collections
+import os
 
 from doepipeline.designer import BaseExperimentDesigner, ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
@@ -16,7 +17,7 @@ class PipelineGenerator:
     rendered into ready-to-run script strings.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, path_sep=None):
         try:
             self._validate_config(config)
         except AssertionError as e:
@@ -30,9 +31,11 @@ class PipelineGenerator:
         self._setup_scripts = before.get('scripts', None)
 
         jobs = [config[job] for job in config['pipeline']]
-        specials = {'results_file': config['results_file']}
-        self._scripts_templates = [parse_job_to_template_string(job, specials)
-                                   for job in jobs]
+        specials = {'results_file': config['results_file'],
+                    'BASEDIR': os.getcwd()}
+        self._scripts_templates = [
+            parse_job_to_template_string(job, specials, path_sep) for job in jobs
+        ]
         self._factors = config['design']['factors']
 
     @classmethod
@@ -164,8 +167,8 @@ class PipelineGenerator:
         # Check that responses are specified.
         assert isinstance(design_responses, dict),\
             'design responses must be key-value-pairs'
-        assert all(isinstance(target, str) for target in design_responses.values()),\
-            'design responses optimization goal must be strings'
+        assert all(isinstance(target, dict) for target in design_responses.values()),\
+            'design responses optimization goal must be key-value mappings'
 
         jobs = [config_dict[job_name] for job_name in job_names]
 
