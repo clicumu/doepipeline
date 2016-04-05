@@ -3,6 +3,7 @@ This module contains executors for simple pipeline execution in
 a Linux-shell.
 """
 import subprocess
+import os
 
 from .base import BasePipelineExecutor, CommandError
 from .mixins import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
@@ -79,4 +80,22 @@ class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
     """ Executor class which runs jobs serially locally. """
 
     def execute_command(self, command, watch=False, wait=False, **kwargs):
-        subprocess.call(command)
+        try:
+            subprocess.call(command, shell=True)
+        except Exception as e:
+            raise CommandError('"{0}": {1}'.format(command, str(e)))
+
+    def read_file_contents(self, file_name):
+        """ Read contents of local file.
+
+        :param str file_name: File to read.
+        :return: File contents.
+        :rtype: str
+        """
+        with open(file_name) as f:
+            contents = f.read()
+
+        return contents
+
+    def _cd(self, dir):
+        os.chdir(dir)
