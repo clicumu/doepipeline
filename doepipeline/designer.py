@@ -3,7 +3,9 @@ import os
 import pyDOE
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from collections import OrderedDict
+from itertools import combinations_with_replacement
 try:
     import pymoddeq
 except ImportError:
@@ -12,6 +14,10 @@ else:
     from pymoddeq.utils import FactorType, DesignType, ResponseCriterion
     from pymoddeq.runner import ModdeQRunner
     has_modde = True
+
+
+class OptimizationFailed(Exception):
+    pass
 
 
 class Factor:
@@ -93,6 +99,12 @@ class ExperimentDesigner(BaseExperimentDesigner):
         else:
             self._design_matrix = matrix_designer(n)
 
+        if len(self.responses) > 1:
+            self._desirabilites = {name: make_desirability_function(factor)
+                                   for name, factor in self.responses.items()}
+        else:
+            self._desirabilites = None
+
     def new_design(self):
         """
 
@@ -103,23 +115,58 @@ class ExperimentDesigner(BaseExperimentDesigner):
         maxes = np.array([f.max for f in self.factors.values()])
         span = np.array([f.span for f in self.factors.values()])
 
-        centers = np.array([f.center for f in self.factors.values()]) / 2
+        centers = np.array([f.center for f in self.factors.values()])
         factor_matrix = self._design_matrix * (span / 2) + centers
 
         # Check if current settings are outside allowed design space.
         if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
             if self._edge_action == 'distort':
+
                 # Simply cap out-of-boundary values at mins and maxes.
                 capped_mins = np.maximum(factor_matrix, mins)
                 capped_mins_and_maxes = np.minimum(capped_mins, maxes)
                 factor_matrix = capped_mins_and_maxes
+
             elif self._edge_action == 'shrink':
                 raise NotImplementedError
 
-        return pd.DataFrame(factor_matrix, columns=self.factors.keys())
+        self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
+        return self._design_sheet
 
-    def update_factors_from_response(self, response):
-        pass
+    def update_factors_from_response(self, response, degree=2):
+        """ Calculate optimal factor settings given response and update
+        factor settings to center around optimum.
+
+        If several responses are defined, the geometric mean of Derringer
+        and Suich's desirability functions will be used for optimization,
+        see:
+
+        Derringer, G., and Suich, R., (1980), "Simultaneous Optimization
+        of Several Response Variables," Journal of Quality Technology, 12,
+        4, 214-219.
+
+        :param pandas.DataFrame response: Response sheet.
+        :param int degree: Degree of polynomial to fit.
+        """
+        if response.shape[1] == 1:
+            criterion = list(self.responses.values())[0]['criterion']
+        else:
+            raise NotImplementedError
+
+        # Find predicted optimal factor setting.
+        optimal_x = predict_optimum(self._design_sheet, response,
+                                    criterion, degree)
+
+        # Update factors around predicted optimal settings, but keep
+        # the same span as previously.
+        spans = np.array([f.span for f in self.factors.values()])
+        new_highs = optimal_x + spans / 2
+        new_lows = optimal_x - spans / 2
+        for i, key in enumerate(self._design_sheet.columns):
+            self.factors[key].current_high = new_highs[i]
+            self.factors[key].current_low = new_lows[i]
+
+        return pd.Series(optimal_x, self._design_sheet.columns)
 
 
 class _ModdeQDesigner(BaseExperimentDesigner):
@@ -242,6 +289,111 @@ class _ModdeQDesigner(BaseExperimentDesigner):
     def update_factors_from_response(self, response):
         pass
 
+
+def make_desirability_function(response):
+    """ Define a Derringer and Suich desirability function.
+
+    :param response_dict:
+    :return:
+    :rtype: Callable
+    """
+    s = response.get('priority', 1)
+    if response['criterion'] == 'target':
+        L = response['low_limit']
+        U = response['high_limit']
+        T = response.get('target', (U + L) / 2)
+
+        def desirability(y):
+            if y < L or U < y:
+                return 0
+            elif  L <= y <= T:
+                return ((y - L) / (T - L)) ** s
+            elif T <= y <= U:
+                return ((y - U) / (T - U)) ** s
+
+    elif response['criterion'] == 'maximize':
+        L = response['low_limit']
+        T = response['target']
+
+        def desirability(y):
+            if y < L:
+                return 0
+            elif T < y:
+                return 1
+            else:
+                return ((y - L) / (T - L)) ** s
+
+    elif response['criterion'] == 'minimize':
+        U = response['high_limit']
+        T = response['target']
+
+        def desirability(y):
+            if y < T:
+                return 1
+            elif U < y:
+                return 0
+            else:
+                return ((y - U) / (T - U)) ** s
+
+    return desirability
+
+
+def predict_optimum(design_sheet, response, criterion, degree=2):
+        """ Regress using `degree`-polynomial and optimize response.
+
+        :param pandas.DataFrame design_sheet: Factor settings.
+        :param pandas.Series response: Response Y-vector.
+        :param str criterion: 'maximize' | 'minimize'
+        :param int degree: Degree of polynomial to use for regression.
+        :return: Array with predicted optimum.
+        :rtype: numpy.ndarray[float]
+        :raises: OptimizationFailed
+        """
+        matrix_columns = design_sheet.columns
+        n_rows, n_cols = design_sheet.shape
+        products = OrderedDict()
+        combinations = [list(comb) for deg in range(1, degree + 1)
+                        for comb in combinations_with_replacement(range(n_cols), deg)]
+
+        # Multiply columns together.
+        for column_group in (matrix_columns[comb] for comb in combinations):
+            values = design_sheet[column_group].product(axis=1)
+            products['*'.join(column_group)] = values
+
+        extended_sheet = pd.DataFrame(products)
+
+        # Extend data-sheet with constants-column.
+        design_w_constants = np.hstack([np.ones((n_rows, 1)),
+                                        extended_sheet.values])
+
+        # Regress using least squares.
+        c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
+        coefficients = c_stacked.flatten()
+
+        # Define optimization function for optimizer.
+        def predicted_response(x, invert=False):
+            # Make extended factor list from given X.
+            factor_list = [1] + [np.product(x[comb]) for comb in combinations]
+            factors = np.array(factor_list)
+
+            # Calculate response.
+            factor_contributions = np.multiply(factors, coefficients)
+            return (-1 if invert else 1) * factor_contributions.sum()
+
+        # Since factors are set according to design the optimum is already
+        # guessed to be at the center of the design. Hence, use medians as
+        # initial guess.
+        x0 = design_sheet.median(axis=0).values
+
+        if criterion == 'maximize':
+            optimization_results = minimize(lambda x: predicted_response(x, True), x0)
+        elif criterion == 'minimize':
+            optimization_results = minimize(predicted_response, x0)
+
+        if not optimization_results['success']:
+            raise OptimizationFailed(optimization_results['message'])
+
+        return optimization_results['x']
 
 
 if has_modde:
