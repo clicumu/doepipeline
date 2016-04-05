@@ -18,7 +18,7 @@ if __name__ == '__main__':
         contents = f.read().strip()
         second_factor = float(contents.split(',')[1])
 
-    result = first_factor + second_factor
+    result = (first_factor - 15) ** 2 + (second_factor - 3) ** 2 #+ first_factor * second_factor
     results_string = 'ResponseA,{0}\n'.format(result)
     out_name = 'results.csv' if not args.o else args.o
 

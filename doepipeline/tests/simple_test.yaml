@@ -4,13 +4,14 @@ design:
         FactorA:
             min: 0
             max: 40
-            low_init: 0
+            low_init: 10
             high_init: 20
         FactorB:
             low_init: 1
             high_init: 2
     responses:
-        ResponseA: maximize
+        ResponseA:
+            criterion: minimize
 
 results_file: my_results.txt
 
@@ -21,17 +22,17 @@ pipeline:
 
 MyFirstJob:
     script: >
-        echo "First,{% FactorA %}" > step_one.txt
+        echo First,{% FactorA %} > step_one.txt
     factors:
         FactorA:
             substitute: true
 
 MySecondJob:
     script: >
-        echo "Second,{% FactorB %}" > step_two.txt
+        echo Second,{% FactorB %} > step_two.txt
     factors:
         FactorB:
             substitute: true
 
 MyThirdJob:
-    script: python make_output.py step_one.txt step_two.txt -o {% results_file %}
+    script: python {% BASEDIR make_output.py %} step_one.txt step_two.txt -o {% results_file %}

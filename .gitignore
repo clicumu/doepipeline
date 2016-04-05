@@ -33,6 +33,7 @@ var/
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 /old_stuff
+/doepipeline/tests/work_dir
 *.spec
 /doepipeline/old_stuff
 
