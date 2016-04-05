@@ -19,8 +19,25 @@ design:
             max: 4
             low_init: 1
             high_init: 2
-    responses:  # One or more.
-        ResponseA: maximize
+    responses:
+        # If multiple responses are given, low_limit and high_limit must be
+        # provided for maximized and minimized responses respectively. As
+        # well as targets. If there is only one response, criterion is enough
+        # for maximized and minimized responses. For target responses low_limit
+        # and high_limit is always required.
+        ResponseA:
+          criterion: maximize
+          target: 4
+          low_limit: 1
+        ResponseB:
+          criterion: minimize
+          high_limit: 10  # low_limit for maximize
+          target: 2.3
+        ResponseC:
+          criterion: target
+          low_limit: 1
+          high_limit: 10
+          target: 4  # If not given, mean of low_limit and high_limit is used.
 
 # File where final results are dumped. One file per "experiment" will be
 # produced.
