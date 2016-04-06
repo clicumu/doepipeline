@@ -4,7 +4,7 @@ import pyDOE
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
 try:
     import pymoddeq
@@ -16,8 +16,9 @@ else:
     has_modde = True
 
 
-class OptimizationFailed(Exception):
-    pass
+OptimizationResult = namedtuple('OptimizationResult', ['predicted_optimum',
+                                                       'converged',
+                                                       'tol'])
 
 
 class Factor:
@@ -39,6 +40,10 @@ class Factor:
 
 
 class UnsupportedDesign(Exception):
+    pass
+
+
+class OptimizationFailed(Exception):
     pass
 
 
@@ -133,9 +138,10 @@ class ExperimentDesigner(BaseExperimentDesigner):
         self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
         return self._design_sheet
 
-    def update_factors_from_response(self, response, degree=2):
+    def update_factors_from_response(self, response, degree=2, tol=.25):
         """ Calculate optimal factor settings given response and update
-        factor settings to center around optimum.
+        factor settings to center around optimum. Returns calculated
+        optimum.
 
         If several responses are defined, the geometric mean of Derringer
         and Suich's desirability functions will be used for optimization,
@@ -147,6 +153,9 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         :param pandas.DataFrame response: Response sheet.
         :param int degree: Degree of polynomial to fit.
+        :param float tol: Accepted elative distance to design space edge.
+        :returns: Calculated optimum.
+        :rtype: OptimizationResult
         """
         if response.shape[1] == 1:
             criterion = list(self.responses.values())[0]['criterion']
@@ -159,14 +168,26 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        spans = np.array([f.span for f in self.factors.values()])
-        new_highs = optimal_x + spans / 2
-        new_lows = optimal_x - spans / 2
-        for i, key in enumerate(self._design_sheet.columns):
-            self.factors[key].current_high = new_highs[i]
-            self.factors[key].current_low = new_lows[i]
+        factor_info = [(f.span, f.current_high, f.current_low)
+                       for f in self.factors.values()]
+        spans, old_highs, old_lows = map(np.array, zip(*factor_info))
+        ratios = (old_highs - optimal_x) / spans
 
-        return pd.Series(optimal_x, self._design_sheet.columns)
+        if np.logical_and(ratios > tol, ratios < 1 - tol).all():
+            converged = True
+        else:
+            converged = False
+            new_highs = optimal_x + spans / 2
+            new_lows = optimal_x - spans / 2
+            for i, key in enumerate(self._design_sheet.columns):
+                self.factors[key].current_high = new_highs[i]
+                self.factors[key].current_low = new_lows[i]
+
+        results = OptimizationResult(
+            pd.Series(optimal_x, self._design_sheet.columns),
+            converged, tol
+        )
+        return results
 
 
 class _ModdeQDesigner(BaseExperimentDesigner):
