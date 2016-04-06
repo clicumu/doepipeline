@@ -44,7 +44,7 @@ class BaseGeneratorTestCase(unittest.TestCase):
                 }
             },
             'responses': {
-                'ResponseA': 'maximize'
+                'ResponseA': {'criterion': 'maximize'}
             }
         }
 

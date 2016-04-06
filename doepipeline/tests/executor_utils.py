@@ -86,7 +86,7 @@ class ExecutorTestCase(unittest.TestCase):
                 }
             },
             'responses': {
-                'ResponseA': 'maximize'
+                'ResponseA': {'criterion': 'maximize'}
             }
         }
 

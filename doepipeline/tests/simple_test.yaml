@@ -8,7 +8,7 @@ design:
             high_init: 20
         FactorB:
             low_init: 1
-            high_init: 2
+            high_init: 4
     responses:
         ResponseA:
             criterion: minimize
