@@ -9,25 +9,17 @@ from .base import BasePipelineExecutor, CommandError
 from .mixins import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
 
 
-class LocalPipelineExecutor(BatchExecutorMixin,
-                            ScreenExecutorMixin,
-                            BasePipelineExecutor):
+class BaseLocalExecutor(BasePipelineExecutor):
 
     """
     Executor class running pipeline locally in a linux shell.
     """
     def __init__(self, run_in_batch=False, *args, **kwargs):
-        super(LocalPipelineExecutor, self).__init__(*args, **kwargs)
+        super(BaseLocalExecutor, self).__init__(*args, **kwargs)
         assert isinstance(run_in_batch, bool), 'run_in_batch must be boolean'
 
         self.run_in_batch = run_in_batch
         self.running_jobs = dict()
-
-    def run_jobs(self, *args, **kwargs):
-        if self.run_in_batch:
-            BatchExecutorMixin.run_jobs(self, *args, **kwargs)
-        else:
-            ScreenExecutorMixin.run_jobs(self, *args, **kwargs)
 
     def poll_jobs(self):
         still_running = list()
@@ -57,8 +49,8 @@ class LocalPipelineExecutor(BatchExecutorMixin,
         :param bool watch: If True, monitor process.
         :param kwargs: Keyword-arguments.
         """
-        super(LocalPipelineExecutor, self).execute_command(command, watch,
-                                                           **kwargs)
+        super(BaseLocalExecutor, self).execute_command(command, watch,
+                                                       **kwargs)
         if watch:
             try:
                 process = subprocess.Popen(command, shell=True)
@@ -74,6 +66,18 @@ class LocalPipelineExecutor(BatchExecutorMixin,
                 subprocess.call(command)
             except OSError as e:
                 raise CommandError(str(e))
+
+
+class LocalBatchExecutor(BatchExecutorMixin, BaseLocalExecutor):
+
+    def poll_jobs(self):
+        BaseLocalExecutor.poll_jobs(self)
+
+
+class LocalScreenExecutor(ScreenExecutorMixin, BaseLocalExecutor):
+
+    def poll_jobs(self):
+        BaseLocalExecutor.poll_jobs(self)
 
 
 class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
@@ -99,3 +103,17 @@ class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
 
     def _cd(self, dir):
         os.chdir(dir)
+
+
+def LocalExecutor(*args, execution_type='serial', **kwargs):
+    if execution_type == 'serial':
+        return LocalSerialExecutor(*args, **kwargs)
+
+    elif execution_type == 'screen':
+        return LocalScreenExecutor(*args, **kwargs)
+
+    elif execution_type == 'batch':
+        return LocalBatchExecutor(*args, **kwargs)
+
+    else:
+        raise ValueError('unknown execution_type: {0}'.format(execution_type))

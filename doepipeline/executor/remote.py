@@ -8,7 +8,8 @@ import time
 import re
 from contextlib import contextmanager
 from doepipeline.executor.base import BasePipelineExecutor, CommandError
-from doepipeline.executor.mixins import ScreenExecutorMixin, BatchExecutorMixin
+from doepipeline.executor import mixins
+
 
 log = logging.getLogger(__name__)
 
@@ -169,7 +170,14 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 self.disconnect()
 
 
-class SSHScreenExecutor(ScreenExecutorMixin, BaseSSHExecutor):
+class SSHSerialExecutor(mixins.SerialExecutorMixin, BaseSSHExecutor):
+
+    def poll_jobs(self):
+        with self.connection():
+            mixins.SerialExecutorMixin.poll_jobs(self)
+
+
+class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
     """
     Executor class which executes jobs in parallel using screens
     at remote host communicating via SSH.
@@ -177,10 +185,10 @@ class SSHScreenExecutor(ScreenExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            ScreenExecutorMixin.poll_jobs(self)
+            mixins.ScreenExecutorMixin.poll_jobs(self)
 
 
-class SSHBatchExecutor(BatchExecutorMixin, BaseSSHExecutor):
+class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
     """
     Executor class which executes jobs in parallel using batch
     scripts at remote host communicating via SSH.
@@ -188,4 +196,18 @@ class SSHBatchExecutor(BatchExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            BatchExecutorMixin.poll_jobs(self)
+            mixins.BatchExecutorMixin.poll_jobs(self)
+
+
+def SSHExecutor(*args, execution_type='serial', **kwargs):
+    if execution_type == 'serial':
+        return SSHSerialExecutor(*args, **kwargs)
+
+    elif execution_type == 'screen':
+        return SSHScreenExecutor(*args, **kwargs)
+
+    elif execution_type == 'batch':
+        return SSHBatchExecutor(*args, **kwargs)
+
+    else:
+        raise ValueError('unknown execution_type: {0}'.format(execution_type))
