@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+"""
+Optimize a data-processing pipeline specified in config-file using
+principles from statistical Design of Experiments (DoE).
+
+doepipeline supports three execution modes:
+    - serial: all experiment are run in series.
+    - screen: the experiments in each step in the pipeline are run in
+              parallel using Linux screens.
+    - batch: the experiments in each step in the pipeline are run in
+             parallel using Linux batch jobs.
+"""
+import argparse
+import getpass
+import os
+import sys
+from doepipeline.executor import SSHExecutor, LocalExecutor
+from doepipeline.generator import PipelineGenerator
+
+
+class Range:
+    """
+    Type checker-class for float input required to be within an interval.
+    """
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def __eq__(self, other):
+        return self.start <= other <= self.end
+
+    def __repr__(self):
+        return '{0}-{1}'.format(self.start, self.end)
+
+
+def make_parser():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('config', help='pipeline config-file')
+
+    ssh_group = parser.add_argument_group()
+
+    ssh_help = ('if this flag is set, run pipeline remotely using ssh. '
+                'will connect to HOST as USER.')
+    ssh_group.add_argument('-s', '--ssh', nargs=2, metavar=('HOST', 'USER'),
+                           help=ssh_help)
+
+    key_help = ('public key file (key or path to key-file). If provided '
+                'SSH-authentication will be performed using provided key.')
+    ssh_group.add_argument('-k', '--key', help=key_help)
+
+    pass_help = ('if this flag is set, the user will be prompted for password'
+                 ' when connection with SSH to HOST.')
+    ssh_group.add_argument('-p', '--password', action='store_true',
+                           default=False, help=pass_help)
+
+    execution_help = ('execution mode to use (default: serial).')
+    parser.add_argument('-e', '--execution', help=execution_help,
+                        choices=['serial', 'screen', 'batch'], default='serial')
+    parser.add_argument('-w', '--workdir', help='working directory (default: .)',
+                        default='.')
+    maxiter_help = ('maximum number of iterations (default: 10)')
+    parser.add_argument('-i', '--maxiter', help=maxiter_help,
+                        default=10, type=int, choices=[Range(0, float('inf'))])
+    tol_help = ('maximum allowed relative distance between predicted optimum '
+                'to edge of experimental design in order to consider '
+                'optimization converged (default: 0.25)')
+    parser.add_argument('--tol', type=float, default=.25,
+                        help=tol_help, choices=[Range(0, 1)])
+    degree_help = 'degree of polynomial fitted during optimization (default: 2)'
+    parser.add_argument('--degree', type=int, choices=[Range(0, float('inf'))],
+                        default=2, help=degree_help)
+    parser.add_argument('-o', '--output', default='optimal_parameters.csv',
+                        help='output file (default: optimal_parameters.csv)')
+
+    return parser
+
+
+if __name__ == '__main__':
+    parser = make_parser()
+    args = parser.parse_args()
+
+    if args.ssh:
+        host, user = args.ssh
+        auth = {
+            'hostname': host,
+            'username': user,
+        }
+        if args.password:
+            prompt = "{0}@{1}'s password: ".format(user, host)
+            auth['password'] = getpass.getpass(prompt)
+        if args.key:
+            if os.path.isfile(args.key):
+                auth['key_filename'] = args.key
+            else:
+                auth['pkey'] = args.key
+
+        executor_class = lambda *args_, **kwargs_: SSHExecutor(auth, *args_,
+                                                               **kwargs_)
+
+    else:
+        executor_class = LocalExecutor
+    try:
+        generator = PipelineGenerator.from_yaml(args.config)
+    except ValueError as e:
+        sys.exit(str(e))
+
+    designer = generator.new_designer_from_config()
+    executor = executor_class(execution_type=args.execution,
+                              workdir=args.workdir,
+                              base_command='{script}')
+
+    n_iter = 0
+    while n_iter < args.maxiter:
+        n_iter += 1
+        design = designer.new_design()
+        pipeline = generator.new_pipeline_collection(design)
+        results = executor.run_pipeline_collection(pipeline)
+        optimum = designer.update_factors_from_response(results, tol=args.tol)
+
+        if optimum.converged:
+            optimum.predicted_optimum.to_csv(args.output)
+            break
+
+    if not optimum.converged:
+        try:
+            prefix, suffix = args.output.rsplit('.', 1)
+        except ValueError:
+            prefix = args.output
+            suffix = ''
+
+        outpath = '.'.join([prefix, 'unconverged', suffix])
+        optimum.predicted_optimum.to_csv(outpath)

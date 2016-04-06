@@ -1,4 +1,5 @@
 from setuptools import setup
+import os
 
 def readme():
     with open('README.rst') as f:
@@ -29,6 +30,9 @@ setup(
     include_package_data=True,
     tests_require=[
         'mock',
+    ],
+    scripts=[
+        os.path.join('bin, doepipeline')
     ],
     zip_safe=False
 )
