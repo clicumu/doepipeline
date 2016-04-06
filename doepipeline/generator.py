@@ -42,7 +42,10 @@ class PipelineGenerator:
     def from_yaml(cls, yaml_config, *args, **kwargs):
         if isinstance(yaml_config, str):
             with open(yaml_config) as f:
-                config = yaml.load(f)
+                try:
+                    config = yaml.load(f)
+                except yaml.parser.ParserError:
+                    raise ValueError('config not valid YAML')
         else:
             try:
                 config = yaml.load(yaml_config)
