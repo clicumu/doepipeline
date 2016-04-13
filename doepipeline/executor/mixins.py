@@ -34,7 +34,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
         for i, step in enumerate(job_steps, start=1):
             for script, job_name in zip(step, experiment_index):
                 log_file = self.base_log.format(name=job_name, i=i)
-                self._cd(job_name)
+                self._cd(job_name, job_name=job_name)
                 try:
                     command = self.base_command.format(script=script)
                 except KeyError:
@@ -45,7 +45,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
                     has_log = False
 
                 if has_log:
-                    self._touch(log_file)
+                    self._touch(log_file, job_name=job_name)
 
                 try:
                     self.execute_command(command, wait=True, watch=True,
@@ -53,7 +53,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
                 except CommandError as e:
                     raise PipelineRunFailed(str(e))
 
-                self._cd('..')
+                self._cd('..', job_name=job_name)
 
     def poll_jobs(self):
         """ Polling does nothing since commands are waited for """

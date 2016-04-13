@@ -1,5 +1,5 @@
 from doepipeline.generator import PipelineGenerator
-from doepipeline.executor import LocalPipelineExecutor
+from doepipeline.executor import BaseLocalExecutor
 from doepipeline.designer import BaseExperimentDesigner
 import pandas as pd
 import numpy as np
@@ -28,6 +28,6 @@ if __name__ == '__main__':
     designer = generator.new_designer_from_config(ExampleDesigner)
     design = designer.new_design()
     pipeline = generator.new_pipeline_collection(design)
-    executor = LocalPipelineExecutor()
+    executor = BaseLocalExecutor()
     results = executor.run_pipeline_collection(pipeline)
     design = designer.update_factors_from_response(results)

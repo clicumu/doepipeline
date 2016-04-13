@@ -40,6 +40,8 @@ design:
 # produced.
 results_file: my_results.txt
 
+working_directory: ~/my_work_directory
+
 pipeline:
     # Specifies order of jobs. These names must match the job-names below.
     - MyFirstJob

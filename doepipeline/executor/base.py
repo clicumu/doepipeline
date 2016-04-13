@@ -85,9 +85,13 @@ class BasePipelineExecutor(object):
         else:
             self.base_log = '{name}_step_{i}.log'
 
+        self.is_setting_up = True
         self.workdir = workdir if workdir is not None else '.'
         self.poll_interval = poll_interval
         self.running_jobs = dict()
+        self.has_workdir = False
+        self.has_experiment_dirs = False
+        self._system = platform.system()
 
     @abc.abstractmethod
     def execute_command(self, command, watch=False, wait=False, **kwargs):
@@ -148,7 +152,8 @@ class BasePipelineExecutor(object):
         job_steps = [[] for _ in range(pipeline_length)]
         env_variables = pipeline_collection['ENV_VARIABLES']
         setup = pipeline_collection['SETUP_SCRIPTS']
-        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE']
+        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE', 'WORKDIR']
+        self.workdir = pipeline_collection.get('WORKDIR', '.')
 
         _items = pipeline_collection.items()
         pipeline_scripts = OrderedDict([(key, value) for key, value in _items\
@@ -161,6 +166,8 @@ class BasePipelineExecutor(object):
             log.info('{} not found, creating directory'.format(self.workdir))
             self._mkdir(self.workdir)
             self._cd(self.workdir)
+
+        self.has_workdir = True
 
         # Run setup-scripts in work-dir.
         if setup is not None:
@@ -180,6 +187,7 @@ class BasePipelineExecutor(object):
             for i, script in enumerate(scripts):
                 job_steps[i].append(script)
 
+        self.has_experiment_dirs = True
         self.run_jobs(job_steps, experiment_index, env_variables)
 
         # Step into each work folder and collect pipeline results.
@@ -187,7 +195,7 @@ class BasePipelineExecutor(object):
         for job_name in experiment_index:
             self._cd(job_name)
             file_name = pipeline_collection['RESULTS_FILE']
-            contents = self.read_file_contents(file_name)
+            contents = self.read_file_contents(file_name, job_name=job_name)
             f_handle = StringIO(contents)
             current_results = pd.Series.from_csv(f_handle)
             results[job_name] = current_results
@@ -206,7 +214,7 @@ class BasePipelineExecutor(object):
         """
 
     @abc.abstractmethod
-    def read_file_contents(self, file_name):
+    def read_file_contents(self, file_name, **kwargs):
         """ Abstract method.
 
         Override to specify how to read file contents.
@@ -229,18 +237,18 @@ class BasePipelineExecutor(object):
                 self.running_jobs = dict()
                 raise PipelineRunFailed(msg)
 
-    def _cd(self, dir):
-        self.execute_command('cd {}'.format(dir))
+    def _cd(self, dir, **kwargs):
+        self.execute_command('cd {}'.format(dir), **kwargs)
 
-    def _touch(self, file_name):
-        if platform.system() == 'Windows':
+    def _touch(self, file_name, **kwargs):
+        if self._system == 'Windows':
             command = 'type NUL >> {file}'
         else:
             command = 'touch {file}'
-        self.execute_command(command.format(file=file_name))
+        self.execute_command(command.format(file=file_name), **kwargs)
 
-    def _mkdir(self, dir):
-        self.execute_command('mkdir {}'.format(dir))
+    def _mkdir(self, dir, **kwargs):
+        self.execute_command('mkdir {}'.format(dir), **kwargs)
 
     def _set_env_variables(self, env_variables):
         if env_variables is None:

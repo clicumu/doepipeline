@@ -34,6 +34,7 @@ var/
 *.manifest
 /old_stuff
 /doepipeline/tests/work_dir
+/Fiddling
 *.spec
 /doepipeline/old_stuff
 

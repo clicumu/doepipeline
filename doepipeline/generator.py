@@ -32,7 +32,7 @@ class PipelineGenerator:
 
         jobs = [config[job] for job in config['pipeline']]
         specials = {'results_file': config['results_file'],
-                    'BASEDIR': os.getcwd()}
+                    'WORKDIR': config.get('working_directory', '.')}
         self._scripts_templates = [
             parse_job_to_template_string(job, specials, path_sep) for job in jobs
         ]
@@ -114,6 +114,7 @@ class PipelineGenerator:
         pipeline_collection['ENV_VARIABLES'] = self._env_variables
         pipeline_collection['SETUP_SCRIPTS'] = self._setup_scripts
         pipeline_collection['RESULTS_FILE'] = self._config['results_file']
+        pipeline_collection['WORKDIR'] = self._config.get('working_directory', '.')
 
         return pipeline_collection
 
@@ -125,7 +126,8 @@ class PipelineGenerator:
         :param config_dict: Pipeline configuration.
         :raises: AssertionError
         """
-        reserved_terms = 'before_run', 'pipeline', 'design', 'results_file'
+        reserved_terms = ('before_run', 'pipeline', 'design',
+                          'results_file', 'working_directory')
         valid_before = 'environment_variables', 'scripts'
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'

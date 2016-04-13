@@ -7,6 +7,7 @@ import logging
 import time
 import re
 from contextlib import contextmanager
+import posixpath
 from doepipeline.executor.base import BasePipelineExecutor, CommandError
 from doepipeline.executor import mixins
 
@@ -48,6 +49,7 @@ class BaseSSHExecutor(BasePipelineExecutor):
                             if key != 'host'}
         self.connect_timeout = connect_timeout
         self.connection_attempts = connection_attempts
+        self._system = kwargs.get('system', 'Linux')
 
     def connect(self, connect_timeout=None, n_attempts=None):
         """ Connect to host using SSH.
@@ -87,7 +89,7 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 # immediately.
                 log.critical('Connection failed: ' + str(e))
                 raise ConnectionFailed(str(e))
-            except (paramiko.SSHException, socket.error):
+            except (paramiko.SSHException, socket.error) as e:
                 # If SSH-connection fails, try to connect again.
                 msg = 'Connection attempt {i} failed, retrying...'
                 log.warn(msg.format(i=attempt + 1))
@@ -97,9 +99,10 @@ class BaseSSHExecutor(BasePipelineExecutor):
                 self._client = client
                 return
 
-        log.critical('Connection failed, run out of attempts.')
+        out_of_attemps_msg = 'Connection failed, run out of attempts.'
+        log.critical(out_of_attemps_msg)
         self._client = None
-        raise ConnectionFailed
+        raise ConnectionFailed(out_of_attemps_msg)
 
     def disconnect(self):
         """ Disconnect from host. """
@@ -117,6 +120,8 @@ class BaseSSHExecutor(BasePipelineExecutor):
         :rtype: tuple[str]
         """
         super(BaseSSHExecutor, self).execute_command(command, watch, **kwargs)
+
+        execution_dir = [self.workdir] if self.has_workdir else []
         if watch:
             try:
                 assert command.startswith('nohup'),\
@@ -132,23 +137,42 @@ class BaseSSHExecutor(BasePipelineExecutor):
             except AssertionError as e:
                 raise ValueError(str(e))
 
+        if self.has_experiment_dirs and 'job_name' in kwargs:
+            execution_dir.append(kwargs['job_name'])
+
+        if execution_dir:
+            cd = [path for path in execution_dir
+                  if not 'cd {path}'.format(path=path) in command]
+            prefix = 'cd {path};'.format(path=posixpath.join(*cd))
+        else:
+            prefix = ''
+
+        full_command = prefix + command
         try:
-            with self.connection(disconnect=watch):
-                stdin, stdout, stderr = self._client.exec_command(command)
+            with self.connection():
+                stdin, stdout, stderr = self._client.exec_command(full_command)
         except paramiko.SSHException as e:
             raise CommandError(str(e))
         else:
+            err = stderr.readlines()
+            if err:
+                raise CommandError('\n'.join(err))
+
             if watch:
                 pids = [line.strip() for line in stdout.readlines()]
                 if len(pids) > 1:
                     self.running_jobs = zip(kwargs['job_name'], pids)
                 else:
-                    self.running_jobs[kwargs['job_name']] = pids[0]
+                    try:
+                        self.running_jobs[kwargs['job_name']] = pids[0]
+                    except IndexError:
+                        # No pid echoed.
+                        pass
 
-        return stdin, stdout, stderr
+        return stdin, stdout.read().decode(), err
 
     @contextmanager
-    def connection(self, disconnect=True):
+    def connection(self, disconnect=False):
         """ Context-manager which reconnects when not connected.
 
         :param bool disconnect: If True, disconnect after call.
@@ -169,8 +193,17 @@ class BaseSSHExecutor(BasePipelineExecutor):
             if disconnect:
                 self.disconnect()
 
+    def read_file_contents(self, file_name, **kwargs):
+        command = 'cat {0}'.format(file_name)
+        _in, contents, _err = self.execute_command(command, **kwargs)
+        return contents
+
 
 class SSHSerialExecutor(mixins.SerialExecutorMixin, BaseSSHExecutor):
+
+    def __init__(self, *args, **kwargs):
+        super(SSHSerialExecutor, self).__init__(*args, **kwargs)
+        self.base_command = 'nohup {script} > {logfile} & echo $!'
 
     def poll_jobs(self):
         with self.connection():
@@ -183,6 +216,10 @@ class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
     at remote host communicating via SSH.
     """
 
+    def __init__(self, *args, **kwargs):
+        super(SSHScreenExecutor, self).__init__(*args, **kwargs)
+        self.base_command = 'nohup {script} > {logfile} & echo $!'
+
     def poll_jobs(self):
         with self.connection():
             mixins.ScreenExecutorMixin.poll_jobs(self)
@@ -193,6 +230,10 @@ class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
     Executor class which executes jobs in parallel using batch
     scripts at remote host communicating via SSH.
     """
+
+    def __init__(self, *args, **kwargs):
+        super(SSHBatchExecutor, self).__init__(*args, **kwargs)
+        self.base_command = 'nohup {script} > {logfile} & echo $!'
 
     def poll_jobs(self):
         with self.connection():

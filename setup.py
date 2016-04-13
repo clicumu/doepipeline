@@ -32,7 +32,7 @@ setup(
         'mock',
     ],
     scripts=[
-        os.path.join('bin, doepipeline')
+        os.path.join('bin', 'doepipeline')
     ],
     zip_safe=False
 )
