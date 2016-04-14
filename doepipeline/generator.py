@@ -115,6 +115,7 @@ class PipelineGenerator:
         pipeline_collection['SETUP_SCRIPTS'] = self._setup_scripts
         pipeline_collection['RESULTS_FILE'] = self._config['results_file']
         pipeline_collection['WORKDIR'] = self._config.get('working_directory', '.')
+        pipeline_collection['JOBNAMES'] = self._config['pipeline']
 
         if 'SLURM' in self._config:
             slurm = self._config['SLURM']
@@ -220,8 +221,8 @@ class PipelineGenerator:
             'job specified with SLURM but SLURM project-name is missing'
 
         if 'SLURM' in config_dict:
-            assert 'project_name' in config_dict['SLURM'],\
-                'SLURM project name required'
+            assert 'account_name' in config_dict['SLURM'],\
+                'SLURM account name required'
 
             for job in jobs:
                 assert 'SLURM' in job,\
