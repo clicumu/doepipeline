@@ -16,8 +16,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
                                                   base_command=base_command,
                                                   **kwargs)
 
-
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
         """ Run all scripts using serial execution.
 
         I.e. no parallelism.
@@ -31,7 +30,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
         """
         self._set_env_variables(env_variables)
 
-        for i, step in enumerate(job_steps, start=1):
+        for i, step in enumerate(job_steps.values(), start=1):
             for script, job_name in zip(step, experiment_index):
                 log_file = self.base_log.format(name=job_name, i=i)
                 self._cd(job_name, job_name=job_name)
@@ -61,7 +60,7 @@ class SerialExecutorMixin(BasePipelineExecutor):
 
 class ScreenExecutorMixin(BasePipelineExecutor):
 
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
         """ Run the collection of jobs in parallel using screens.
 
         Example job_steps:
@@ -97,7 +96,7 @@ class ScreenExecutorMixin(BasePipelineExecutor):
 
         # Run all scripts of each step in parallel using screens.
         # If a step fails, raise PipelineRunFailed.
-        for i, step in enumerate(job_steps, start=1):
+        for i, step in enumerate(job_steps.values(), start=1):
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
                 log_file = self.base_log.format(name=job_name, i=i)
@@ -215,7 +214,7 @@ class BatchExecutorMixin(BasePipelineExecutor):
         # else:
         #     return self.JOB_FINISHED, 'no jobs running.'
 
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
         """ Run the collection of jobs in parallel using batch execution.
 
         Example job_steps:
@@ -255,7 +254,7 @@ class BatchExecutorMixin(BasePipelineExecutor):
 
         base_command= 'cd {job_dir} && {{log_script}}' + base + ' && cd .. & echo $! &'
 
-        for i, step in enumerate(job_steps, start=1):
+        for i, step in enumerate(job_steps.values(), start=1):
             commands = list()
             for script, job_name in zip(step, experiment_index):
                 # Prepare log and command.
@@ -284,3 +283,43 @@ class BatchExecutorMixin(BasePipelineExecutor):
                 self._wait_until_current_jobs_are_finished()
             except PipelineRunFailed:
                 raise
+
+
+class SlurmExecutorMixin(BasePipelineExecutor):
+
+    def run_jobs(self, job_steps, experiment_index, env_variables, slurm):
+
+        base_command = 'sbatch -A {A} {flags} -J {{name}} {{script}}'
+        required_flags = 'n', 'p', 't'
+
+        for (step_name, step), slurm_spec in zip(job_steps.items(), slurm['jobs']):
+
+            # Filter out optional flags.
+            flag_specs = ((key, value) for key, value in slurm_spec.items())
+            flags = []
+            for flag, value in flag_specs:
+                # Prepare flag-key first since some flags doesn't carry
+                # a parameter...
+                new_flag = ('-{f}' if len(flag) == 1 else '--{f}').format(f=flag)
+
+                # ... but if they do, add parameter.
+                if value is not None:
+                    new_flag += ' {}'.format(value)
+                flags.append(new_flag)
+
+            # Preformat command-string with non-step specific info.
+            flag_str = ' '.join(flags)
+            command_step = base_command.format(A=slurm['account_name'],
+                                               p=slurm_spec['p'],
+                                               n=slurm_spec['n'],
+                                               flags=flag_str)
+            for exp_name, script in zip(experiment_index, step):
+                job_name = '{0}_exp_{1}'.format(step_name, exp_name)
+                command = command_step.format(name=job_name, script=script)
+
+                self.execute_command(command)
+
+            self._wait_until_current_jobs_are_finished()
+
+    def poll_jobs(self):
+        pass

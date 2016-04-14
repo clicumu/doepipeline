@@ -149,17 +149,18 @@ class BasePipelineExecutor(object):
         # Initialization..
         pipeline_length = len(next(iter(pipeline_collection.values())))
         experiment_index = list()
-        job_steps = [[] for _ in range(pipeline_length)]
+        job_steps = OrderedDict((name, list()) for\
+                                name in pipeline_collection['JOBNAMES'])
         env_variables = pipeline_collection['ENV_VARIABLES']
         setup = pipeline_collection['SETUP_SCRIPTS']
         reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE',
-                    'WORKDIR', 'SLURM']
+                    'WORKDIR', 'SLURM', 'JOBNAMES']
         self.workdir = pipeline_collection.get('WORKDIR', '.')
         kwargs = {
             key.lower(): pipeline_collection[key] for key in reserved \
             if key in pipeline_collection \
             and key not in ('ENV_VARIABLES', 'SETUP_SCRIPTS',
-                            'RESULTS_FILE', 'WORKDIR')
+                            'RESULTS_FILE', 'WORKDIR', 'JOBNAMES')
         }
 
         _items = pipeline_collection.items()
@@ -191,8 +192,8 @@ class BasePipelineExecutor(object):
             log.debug('Creating directory: {}'.format(job_name))
             self._mkdir(job_name)
 
-            for i, script in enumerate(scripts):
-                job_steps[i].append(script)
+            for job_name, script in zip(job_steps, scripts):
+                job_steps[job_name].append(script)
 
         self.has_experiment_dirs = True
         self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)

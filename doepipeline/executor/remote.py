@@ -243,7 +243,7 @@ class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
 class SSHSlurmExecutor(mixins.SlurmExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
-        with self.connection()
+        with self.connection():
             mixins.SlurmExecutorMixin.poll_jobs(self)
 
 
