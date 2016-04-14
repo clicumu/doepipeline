@@ -39,8 +39,10 @@ design:
 # File where final results are dumped. One file per "experiment" will be
 # produced.
 results_file: my_results.txt
-
 working_directory: ~/my_work_directory
+SLURM:
+    project_name: p2010999
+
 
 pipeline:
     # Specifies order of jobs. These names must match the job-names below.
@@ -61,6 +63,19 @@ MyFirstJob:
             script_option: --factor_a
         FactorB:
             script_option: --factor_b
+    SLURM:
+        # If SLURM-executor is used job-settings for slurm must be provided for
+        # Each job. These three are mandatory.
+        p: node
+        n: 1
+        t: 20:00:00
+
+        # Optional flags can be added. If single character-name interpreted
+        # as single-dash option, otherwise double-dash.
+        C: mem128GB
+
+        # Flags without parameter are specified using only their key.
+        bell:
 
 MySecondJob:
     script: >

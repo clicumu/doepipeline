@@ -74,7 +74,6 @@ The pipeline is specified in a YAML config file. Example:
                 # added as a option to the job-script.
                 script_option: --factor_a
             FactorB:
-                script_option: --factor_b
 
     MySecondJob:
         script: >

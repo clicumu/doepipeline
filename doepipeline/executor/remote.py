@@ -240,7 +240,21 @@ class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
             mixins.BatchExecutorMixin.poll_jobs(self)
 
 
+class SSHSlurmExecutor(mixins.SlurmExecutorMixin, BaseSSHExecutor):
+
+    def poll_jobs(self):
+        with self.connection()
+            mixins.SlurmExecutorMixin.poll_jobs(self)
+
+
 def SSHExecutor(*args, execution_type='serial', **kwargs):
+    """ Convenience function for SSH-executors.
+
+    :param args: positional arguments passed to Executor-class.
+    :param execution_type: 'serial' | 'screen' | 'batch' | 'slurm'
+    :param kwargs: keyword arguments passed to Executor-class
+    :return: Executor-instance
+    """
     if execution_type == 'serial':
         return SSHSerialExecutor(*args, **kwargs)
 
@@ -249,6 +263,9 @@ def SSHExecutor(*args, execution_type='serial', **kwargs):
 
     elif execution_type == 'batch':
         return SSHBatchExecutor(*args, **kwargs)
+
+    elif execution_type == 'slurm':
+        return SSHSlurmExecutor(*args, **kwargs)
 
     else:
         raise ValueError('unknown execution_type: {0}'.format(execution_type))

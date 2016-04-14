@@ -152,8 +152,15 @@ class BasePipelineExecutor(object):
         job_steps = [[] for _ in range(pipeline_length)]
         env_variables = pipeline_collection['ENV_VARIABLES']
         setup = pipeline_collection['SETUP_SCRIPTS']
-        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE', 'WORKDIR']
+        reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE',
+                    'WORKDIR', 'SLURM']
         self.workdir = pipeline_collection.get('WORKDIR', '.')
+        kwargs = {
+            key.lower(): pipeline_collection[key] for key in reserved \
+            if key in pipeline_collection \
+            and key not in ('ENV_VARIABLES', 'SETUP_SCRIPTS',
+                            'RESULTS_FILE', 'WORKDIR')
+        }
 
         _items = pipeline_collection.items()
         pipeline_scripts = OrderedDict([(key, value) for key, value in _items\
@@ -188,7 +195,7 @@ class BasePipelineExecutor(object):
                 job_steps[i].append(script)
 
         self.has_experiment_dirs = True
-        self.run_jobs(job_steps, experiment_index, env_variables)
+        self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)
 
         # Step into each work folder and collect pipeline results.
         results = dict()
@@ -204,7 +211,7 @@ class BasePipelineExecutor(object):
         return pd.DataFrame(results).T
 
     @abc.abstractmethod
-    def run_jobs(self, job_steps, experiment_index, env_variables):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
         """ Abstract method.
 
         :param list[list] job_steps:

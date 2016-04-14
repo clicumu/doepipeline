@@ -116,6 +116,14 @@ class PipelineGenerator:
         pipeline_collection['RESULTS_FILE'] = self._config['results_file']
         pipeline_collection['WORKDIR'] = self._config.get('working_directory', '.')
 
+        if 'SLURM' in self._config:
+            slurm = self._config['SLURM']
+            slurm['jobs'] = list()
+            for job in (self._config[name] for name in self._config['pipeline']):
+                slurm['jobs'].append(job['SLURM'])
+
+            pipeline_collection['SLURM'] = slurm
+
         return pipeline_collection
 
     def _validate_config(self, config_dict):
@@ -127,7 +135,7 @@ class PipelineGenerator:
         :raises: AssertionError
         """
         reserved_terms = ('before_run', 'pipeline', 'design',
-                          'results_file', 'working_directory')
+                          'results_file', 'working_directory', 'SLURM')
         valid_before = 'environment_variables', 'scripts'
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'
@@ -206,3 +214,21 @@ class PipelineGenerator:
             assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script'])\
                        for fac, fac_d in job['factors'].items()\
                        if fac_d.get('substitute', False)), msg
+
+        # Check SLURM-specifics.
+        assert (any('SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict),\
+            'job specified with SLURM but SLURM project-name is missing'
+
+        if 'SLURM' in config_dict:
+            assert 'project_name' in config_dict['SLURM'],\
+                'SLURM project name required'
+
+            for job in jobs:
+                assert 'SLURM' in job,\
+                    'All jobs must have SLURM-settings specified'
+                assert 'p' in job['SLURM'] and job['SLURM']['p'],\
+                    'job type must be set (-p)'
+                assert 'n' in job['SLURM'] and job['SLURM']['n'],\
+                    'job cores/nodes must be set (-n)'
+                assert 't' in job['SLURM'] and job['SLURM']['t'],\
+                    'job time must be set (-t)'
