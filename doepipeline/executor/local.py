@@ -71,13 +71,13 @@ class BaseLocalExecutor(BasePipelineExecutor):
 class LocalBatchExecutor(BatchExecutorMixin, BaseLocalExecutor):
 
     def poll_jobs(self):
-        BaseLocalExecutor.poll_jobs(self)
+        return BaseLocalExecutor.poll_jobs(self)
 
 
 class LocalScreenExecutor(ScreenExecutorMixin, BaseLocalExecutor):
 
     def poll_jobs(self):
-        BaseLocalExecutor.poll_jobs(self)
+        return BaseLocalExecutor.poll_jobs(self)
 
 
 class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):

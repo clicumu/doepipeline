@@ -232,7 +232,7 @@ class BasePipelineExecutor(object):
         :rtype: str
         """
 
-    def _wait_until_current_jobs_are_finished(self):
+    def wait_until_current_jobs_are_finished(self):
         # Monitor job status.
         while 'running':
             status, msg = self.poll_jobs()

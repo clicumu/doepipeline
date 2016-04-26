@@ -207,7 +207,7 @@ class SSHSerialExecutor(mixins.SerialExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            mixins.SerialExecutorMixin.poll_jobs(self)
+            return mixins.SerialExecutorMixin.poll_jobs(self)
 
 
 class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
@@ -222,7 +222,7 @@ class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            mixins.ScreenExecutorMixin.poll_jobs(self)
+            return mixins.ScreenExecutorMixin.poll_jobs(self)
 
 
 class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
@@ -244,7 +244,7 @@ class SSHSlurmExecutor(mixins.SlurmExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            mixins.SlurmExecutorMixin.poll_jobs(self)
+            return mixins.SlurmExecutorMixin.poll_jobs(self)
 
 
 def SSHExecutor(*args, execution_type='serial', **kwargs):
