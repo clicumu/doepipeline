@@ -51,10 +51,13 @@ class BaseExperimentDesigner:
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, factors, design_type, responses, at_edges='distort'):
+    def __init__(self, factors, design_type, responses,
+                 at_edges='distort', relative_step=.25):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
+            assert relative_step is None or 0 < relative_step < 1,\
+                'relative_step must be float between 0 and 1 not {}'.format(relative_step)
         except AssertionError as e:
             raise ValueError(str(e))
 
@@ -69,6 +72,7 @@ class BaseExperimentDesigner:
             factor.current_low = f_spec['low_init']
             self.factors[factor_name] = factor
 
+        self.step_length = relative_step
         self.design_type = design_type
         self.responses = responses
         self._edge_action = at_edges
@@ -168,17 +172,27 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        factor_info = [(f.span, f.current_high, f.current_low)
+        factor_info = [(f.span, f.current_high, f.current_low, f.center)
                        for f in self.factors.values()]
-        spans, old_highs, old_lows = map(np.array, zip(*factor_info))
+        spans, old_highs, old_lows, centers = map(np.array, zip(*factor_info))
         ratios = (old_highs - optimal_x) / spans
 
         if np.logical_and(ratios > tol, ratios < 1 - tol).all():
             converged = True
         else:
             converged = False
-            new_highs = optimal_x + spans / 2
-            new_lows = optimal_x - spans / 2
+
+            # Calculate the new design center.
+            if self.step_length is not None:
+                allowed = spans * self.step_length
+                diff = optimal_x - centers
+                shift = allowed * (diff / np.linalg.norm(diff))
+                new_center = centers + shift
+            else:
+                new_center = optimal_x
+
+            new_highs = new_center + spans / 2
+            new_lows = new_center - spans / 2
             for i, key in enumerate(self._design_sheet.columns):
                 self.factors[key].current_high = new_highs[i]
                 self.factors[key].current_low = new_lows[i]
