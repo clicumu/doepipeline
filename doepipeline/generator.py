@@ -121,7 +121,7 @@ class PipelineGenerator:
             slurm = self._config['SLURM']
             slurm['jobs'] = list()
             for job in (self._config[name] for name in self._config['pipeline']):
-                slurm['jobs'].append(job['SLURM'])
+                slurm['jobs'].append(job.get('SLURM', None))
 
             pipeline_collection['SLURM'] = slurm
 
@@ -224,7 +224,7 @@ class PipelineGenerator:
             assert 'account_name' in config_dict['SLURM'],\
                 'SLURM account name required'
 
-            for job in jobs:
+            for job in (j for j in jobs if 'SLURM' in j):
                 assert 'SLURM' in job,\
                     'All jobs must have SLURM-settings specified'
                 assert 'p' in job['SLURM'] and job['SLURM']['p'],\
