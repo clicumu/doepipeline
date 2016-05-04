@@ -102,12 +102,12 @@ The pipeline is specified in a YAML config file. Example:
 
         * Script options: Factors with a specified `script_option` will be added as options to the end of the current script.
 
-* `factors`: Lists  scripts parameters varied according to current experimental design.
-
-    * `FactorName`: unique identifier of current factor.
-
-        * `factor_name`: Name of factor in current MODDE-design.
-
-        * `script_option`: Option passed to script if factor is passed to step as a script option.
-
-        * `substitute`: If equal to `true` factor will be substituted into script using template tag of `FactorName`.
+    * `factors`: Lists  scripts parameters varied according to current experimental design.
+    
+        * `FactorName`: unique identifier of current factor.
+    
+            * `factor_name`: Name of factor in current MODDE-design.
+    
+            * `script_option`: Option passed to script if factor is passed to step as a script option.
+    
+            * `substitute`: If equal to `true` factor will be substituted into script using template tag of `FactorName`.
