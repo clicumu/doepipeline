@@ -217,8 +217,9 @@ class PipelineGenerator:
                        if fac_d.get('substitute', False)), msg
 
         # Check SLURM-specifics.
-        assert (any('SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict),\
-            'job specified with SLURM but SLURM project-name is missing'
+        if any('SLURM' in job.keys() for job in jobs):
+            assert 'SLURM' in config_dict, \
+                "at least one job specified with SLURM but no SLURM entry found in config file"
 
         if 'SLURM' in config_dict:
             assert 'account_name' in config_dict['SLURM'],\
