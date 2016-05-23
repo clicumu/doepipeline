@@ -101,7 +101,7 @@ class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
 
         return contents
 
-    def _cd(self, dir):
+    def _cd(self, dir, **kwargs):
         os.chdir(dir)
 
 
