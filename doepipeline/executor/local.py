@@ -89,7 +89,7 @@ class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
         except Exception as e:
             raise CommandError('"{0}": {1}'.format(command, str(e)))
 
-    def read_file_contents(self, file_name):
+    def read_file_contents(self, file_name, **kwargs):
         """ Read contents of local file.
 
         :param str file_name: File to read.
