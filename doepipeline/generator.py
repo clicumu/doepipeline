@@ -106,7 +106,7 @@ class PipelineGenerator:
                 replacement = {}
                 for factor_name in script_factors:
                     factor_value = experiment[factor_name]
-                    replacement[factor_name] = factor_value
+                    replacement[factor_name] = int(round(factor_value))
 
                 # Replace the factor placeholders with the factor values
                 script = script.format(**replacement)
