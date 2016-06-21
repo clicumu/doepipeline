@@ -97,15 +97,19 @@ class PipelineGenerator:
             rendered_scripts = list()
 
             for script in self._scripts_templates:
-                for factor_name in self._factors:
-                    # Get current parameter setting.
+                # Find which factors are used in the script template
+                factor_name_list = [factor_name for factor_name in self._factors]
+                pattern = re.compile("(" + "|".join(factor_name_list) + ")")
+                script_factors = re.findall(pattern, script)
+
+                # Get current factor settings
+                replacement = {}
+                for factor_name in script_factors:
                     factor_value = experiment[factor_name]
-                    replacement = {factor_name: factor_value}
-                    try:
-                        script = script.format(**replacement)
-                    except KeyError:
-                        # Current factor not present in current script.
-                        continue
+                    replacement[factor_name] = factor_value
+
+                # Replace the factor placeholders with the factor values
+                script = script.format(**replacement)
 
                 rendered_scripts.append(script)
 
