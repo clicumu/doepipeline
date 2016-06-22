@@ -143,9 +143,9 @@ class BaseSSHExecutor(BasePipelineExecutor):
         if execution_dir:
             cd = [path for path in execution_dir
                   if not 'cd {path}'.format(path=path) in command]
-            prefix = 'cd {path};'.format(path=posixpath.join(*cd))
+            prefix = '. ./.bash_profile; cd {path};'.format(path=posixpath.join(*cd))  # must interpret the bash_profile for user specified environment things, such as the users' own python installation
         else:
-            prefix = ''
+            prefix = '. ./.bash_profile;'
 
         full_command = prefix + command
         try:
