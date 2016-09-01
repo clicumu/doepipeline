@@ -409,7 +409,6 @@ def predict_optimum(design_sheet, response, criterion, factors, degree=2):
         # Define optimization function for optimizer.
         def predicted_response(x, invert=False):
             # Make extended factor list from given X.
-            print (x)
             factor_list = [1] + [np.product(x[comb]) for comb in combinations]
             factors = np.array(factor_list)
 
@@ -428,12 +427,6 @@ def predict_optimum(design_sheet, response, criterion, factors, degree=2):
         bounds = list(zip(mins, maxes))
 
         # IF THERE ARE NO MIN/MAX, THE BOUNDS SHOULD BE THE CURRENT MIN/MAX SETTINGS (ie., we cannot go outside the design space.)
-        print (type(mins))
-        print (mins)
-        print (type(maxes))
-        print (maxes)
-        print (type(bounds))
-        print (bounds)
 
         if criterion == 'maximize':
             optimization_results = minimize(lambda x: predicted_response(x, True), x0, method='L-BFGS-B', bounds=bounds)
