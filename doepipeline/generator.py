@@ -24,19 +24,30 @@ class PipelineGenerator:
             raise ValueError('Invalid config: ' + str(e))
 
         self._config = config
-        self._current_iteration = 0
+        self._current_iteration = 1
+        self._setting_up = True
 
         before = config.get('before_run', {})
         self._env_variables = before.get('environment_variables', None)
         self._setup_scripts = before.get('scripts', None)
 
         jobs = [config[job] for job in config['pipeline']]
-        specials = {'results_file': config['results_file'],
-                    'WORKDIR': config.get('working_directory', '.')}
+
+        # current workdir should be corresponding iteration, but save the base directory
+        self._config['base_directory'] = self._config['working_directory']
+        self._update_working_directory()
+
+        specials = {'results_file': self._config['results_file'],
+                    'WORKDIR': self._config['working_directory']}
         self._scripts_templates = [
             parse_job_to_template_string(job, specials, path_sep) for job in jobs
         ]
         self._factors = config['design']['factors']
+        print(self._config['working_directory'])
+
+    def _update_working_directory(self):
+        workdir = os.path.join(self._config.get('base_directory', '.'), str(self._current_iteration))
+        self._config['working_directory'] = workdir
 
     @classmethod
     def from_yaml(cls, yaml_config, *args, **kwargs):
@@ -51,7 +62,6 @@ class PipelineGenerator:
                 config = yaml.load(yaml_config)
             except AttributeError:
                 raise ValueError('yaml_config must be path or file-handle')
-
         return cls(config, *args, **kwargs)
 
     def new_designer_from_config(self, designer_class=None, *args, **kwargs):
@@ -87,6 +97,9 @@ class PipelineGenerator:
         :rtype: collections.OrderedDict
         """
         pipeline_collection = collections.OrderedDict()
+        if not self._setting_up:
+            self._current_iteration += 1
+            self._update_working_directory()
 
         for i, experiment in experiment_design.iterrows():
             if exp_id_column is not None:
@@ -97,15 +110,20 @@ class PipelineGenerator:
             rendered_scripts = list()
 
             for script in self._scripts_templates:
-                for factor_name in self._factors:
-                    # Get current parameter setting.
+
+                # Find which factors are used in the script template
+                factor_name_list = [factor_name for factor_name in self._factors]
+                pattern = re.compile("(" + "|".join(factor_name_list) + ")")
+                script_factors = re.findall(pattern, script)
+
+                # Get current factor settings
+                replacement = {}
+                for factor_name in script_factors:
                     factor_value = experiment[factor_name]
-                    replacement = {factor_name: factor_value}
-                    try:
-                        script = script.format(**replacement)
-                    except KeyError:
-                        # Current factor not present in current script.
-                        continue
+                    replacement[factor_name] = int(round(factor_value))
+
+                # Replace the factor placeholders with the factor values
+                script = script.format(**replacement)
 
                 rendered_scripts.append(script)
 
@@ -114,7 +132,7 @@ class PipelineGenerator:
         pipeline_collection['ENV_VARIABLES'] = self._env_variables
         pipeline_collection['SETUP_SCRIPTS'] = self._setup_scripts
         pipeline_collection['RESULTS_FILE'] = self._config['results_file']
-        pipeline_collection['WORKDIR'] = self._config.get('working_directory', '.')
+        pipeline_collection['WORKDIR'] = self._config['working_directory']
         pipeline_collection['JOBNAMES'] = self._config['pipeline']
 
         if 'SLURM' in self._config:
@@ -125,6 +143,8 @@ class PipelineGenerator:
 
             pipeline_collection['SLURM'] = slurm
 
+        if self._setting_up:
+            self._setting_up = False
         return pipeline_collection
 
     def _validate_config(self, config_dict):
@@ -217,8 +237,9 @@ class PipelineGenerator:
                        if fac_d.get('substitute', False)), msg
 
         # Check SLURM-specifics.
-        assert (any('SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict),\
-            'job specified with SLURM but SLURM project-name is missing'
+        if any('SLURM' in job.keys() for job in jobs):
+            assert 'SLURM' in config_dict, \
+                "at least one job specified with SLURM but no SLURM entry found in config file"
 
         if 'SLURM' in config_dict:
             assert 'account_name' in config_dict['SLURM'],\

@@ -155,7 +155,7 @@ class BasePipelineExecutor(object):
         setup = pipeline_collection['SETUP_SCRIPTS']
         reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE',
                     'WORKDIR', 'SLURM', 'JOBNAMES']
-        self.workdir = pipeline_collection.get('WORKDIR', '.')
+        self.workdir = pipeline_collection['WORKDIR']
         kwargs = {
             key.lower(): pipeline_collection[key] for key in reserved \
             if key in pipeline_collection \

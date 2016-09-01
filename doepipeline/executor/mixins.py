@@ -318,7 +318,7 @@ class SlurmExecutorMixin(BasePipelineExecutor):
                     # Create SLURM-compatible batch-script file
                     # with current command.
                     batch_file = '{name}.sh'.format(name=job_name)
-                    file_script = 'echo "#!/bin/sh\n{cmd}\n" > {name}.sh'.format(
+                    file_script = 'echo "#!/bin/bash\n{cmd}\n" > {name}.sh'.format(
                         cmd=script, name=job_name
                     )
                     self.execute_command(file_script, job_name=exp_name)

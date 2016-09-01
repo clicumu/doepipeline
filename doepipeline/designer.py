@@ -3,6 +3,7 @@ import os
 import pyDOE
 import numpy as np
 import pandas as pd
+import sys
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
@@ -36,7 +37,7 @@ class Factor:
 
     @property
     def center(self):
-        return (self.current_high + self.current_low) / 2
+        return (self.current_high + self.current_low) / 2.0
 
 
 class UnsupportedDesign(Exception):
@@ -161,6 +162,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
         :returns: Calculated optimum.
         :rtype: OptimizationResult
         """
+        print(response)
         if response.shape[1] == 1:
             criterion = list(self.responses.values())[0]['criterion']
         else:
@@ -168,7 +170,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         # Find predicted optimal factor setting.
         optimal_x = predict_optimum(self._design_sheet, response,
-                                    criterion, degree)
+                                    criterion, self.factors, degree)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
@@ -373,7 +375,7 @@ def make_desirability_function(response):
     return desirability
 
 
-def predict_optimum(design_sheet, response, criterion, degree=2):
+def predict_optimum(design_sheet, response, criterion, factors, degree=2):
         """ Regress using `degree`-polynomial and optimize response.
 
         :param pandas.DataFrame design_sheet: Factor settings.
@@ -404,26 +406,39 @@ def predict_optimum(design_sheet, response, criterion, degree=2):
         # Regress using least squares.
         c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
         coefficients = c_stacked.flatten()
-
         # Define optimization function for optimizer.
         def predicted_response(x, invert=False):
             # Make extended factor list from given X.
+            print (x)
             factor_list = [1] + [np.product(x[comb]) for comb in combinations]
             factors = np.array(factor_list)
 
             # Calculate response.
             factor_contributions = np.multiply(factors, coefficients)
-            return (-1 if invert else 1) * factor_contributions.sum()
+            return (-1 if invert else 1) * factor_contributions.sum()  
 
         # Since factors are set according to design the optimum is already
         # guessed to be at the center of the design. Hence, use medians as
         # initial guess.
         x0 = design_sheet.median(axis=0).values
 
+        # Create a sequence of (max, min) bounds for each factor, replace '+/-inf' with None
+        mins = np.array([f.min if f.min != '-inf' else None for f in factors.values()])
+        maxes = np.array([f.max if f.max != 'inf' else None for f in factors.values()])
+        bounds = list(zip(mins, maxes))
+
+        # IF THERE ARE NO MIN/MAX, THE BOUNDS SHOULD BE THE CURRENT MIN/MAX SETTINGS (ie., we cannot go outside the design space.)
+        print (type(mins))
+        print (mins)
+        print (type(maxes))
+        print (maxes)
+        print (type(bounds))
+        print (bounds)
+
         if criterion == 'maximize':
-            optimization_results = minimize(lambda x: predicted_response(x, True), x0)
+            optimization_results = minimize(lambda x: predicted_response(x, True), x0, method='L-BFGS-B', bounds=bounds)
         elif criterion == 'minimize':
-            optimization_results = minimize(predicted_response, x0)
+            optimization_results = minimize(predicted_response, x0, method='L-BFGS-B', bounds=bounds)
 
         if not optimization_results['success']:
             raise OptimizationFailed(optimization_results['message'])
