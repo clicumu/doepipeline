@@ -119,8 +119,9 @@ class PipelineGenerator:
                 # Get current factor settings
                 replacement = {}
                 for factor_name in script_factors:
+                    factor_type = self._factors[factor_name].get('type', 'quantitative')
                     factor_value = experiment[factor_name]
-                    replacement[factor_name] = int(round(factor_value))
+                    replacement[factor_name] = int(factor_value) if factor_type == 'ordinal' else factor_value
 
                 # Replace the factor placeholders with the factor values
                 script = script.format(**replacement)
@@ -187,7 +188,8 @@ class PipelineGenerator:
                     'environment_variables values must be strings'
 
         design = config_dict['design']
-        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type'
+        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type', 'numeric_type'
+        allowed_factor_types = 'quantitative', 'ordinal', 'categorical'
         assert 'type' in design, 'design type is missing'
         assert 'factors' in design, 'design factors is missing'
         assert 'responses' in design, 'design responses is missing'
@@ -197,6 +199,9 @@ class PipelineGenerator:
         for key, factor_settings in design_factors.items():
             assert all(key in allowed_factor_keys for key in factor_settings),\
                 'invalid key, allowed keys for factors: {}'.format(allowed_factor_keys)
+            if 'type' in factor_settings:
+                assert factor_settings['type'] in allowed_factor_types,\
+                    '"type" must be one of {}, error in factor {}'.format(allowed_factor_types, key)
 
         # Check that responses are specified.
         assert isinstance(design_responses, dict),\
