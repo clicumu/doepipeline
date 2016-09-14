@@ -7,6 +7,7 @@ import sys
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
+from types import IntType
 try:
     import pymoddeq
 except ImportError:
@@ -22,14 +23,14 @@ OptimizationResult = namedtuple('OptimizationResult', ['predicted_optimum',
                                                        'tol'])
 
 
-class Factor:
+class NumericFactor:
 
-    def __init__(self, factor_max, factor_min, factor_type):
+    def __init__(self, factor_type, factor_max, factor_min):
+        self.type = factor_type
+        self.current_low = None
+        self.current_high = None
         self.max = factor_max
         self.min = factor_min
-        self.type = factor_type
-        self.current_high = None
-        self.current_low = None
 
     @property
     def span(self):
@@ -38,6 +39,54 @@ class Factor:
     @property
     def center(self):
         return (self.current_high + self.current_low) / 2.0
+
+
+class QuantitativeFactor(NumericFactor):
+
+    def __init__(self, factor_type, factor_max, factor_min):
+        super(QuantitativeFactor, self).__init__(factor_type, factor_max, factor_min)
+
+
+class OrdinalFactor(NumericFactor):
+
+    def __init__(self, factor_type, factor_max, factor_min):
+        assert type(factor_max) is IntType or factor_max != float('inf'), \
+            "factor_max is not an integer: {}".format(factor_max)
+        assert type(factor_min) is IntType or factor_min != float('-inf'), \
+            "factor_min is not an integer: {}".format(factor_min)
+        self.int_attributes = ("current_low", "current_high")
+        super(OrdinalFactor, self).__init__(factor_type, factor_max, factor_min)
+
+    def __setattr__(self, attribute, value):
+        if attribute in self.int_attributes:
+            assert type(attribute) is IntType, \
+                "{} data type must be integer for an Ordinal Factor, was {}.".format(attribute, type(value))
+        super(OrdinalFactor, self).__setattr__(self, attribute, value)
+
+
+class CategoricalFactor:
+    
+    def __init__(self, categories):
+        raise NotImplementedError
+    
+
+def Factor(factor_type, *args, **kwargs):
+    """
+    Factory method stratified by the factor_type parameter
+
+    :param str factor_type: The Factor Type (ordinal, quantitative, categorical).
+    :returns: An instance of either QuantitativeFactor, OrdinalFactor or CategoricalFactor.
+    :rtype: Class instance.
+    :raises: UnsupportedFactorType
+    """
+    if factor_type.lower() == "quantitative": return QuantitativeFactor(factor_type, *args, **kwargs)
+    elif factor_type.lower() == "ordinal": return OrdinalFactor(factor_type, *args, **kwargs)
+    elif factor_type.lower() == "categorical": return CategoricalFactor(factor_type, *args, **kwargs)
+    else: raise UnsupportedFactorType
+
+
+class UnsupportedFactorType(Exception):
+    pass
 
 
 class UnsupportedDesign(Exception):
@@ -69,8 +118,8 @@ class BaseExperimentDesigner:
             f_max = f_spec.get('max', float('inf'))
             f_type = f_spec.get('type', 'quantitative')
             factor = Factor(f_max, f_min, f_type)
-            factor.current_high = f_spec['high_init']
-            factor.current_low = f_spec['low_init']
+            factor.current_high = int(f_spec['high_init']) if f_type == 'ordinal' else f_spec['high_init']
+            factor.current_low = int(f_spec['low_init']) if f_type == 'ordinal' else f_spec['low_init']
             self.factors[factor_name] = factor
 
         self.step_length = relative_step
@@ -124,11 +173,16 @@ class ExperimentDesigner(BaseExperimentDesigner):
         mins = np.array([f.min for f in self.factors.values()])
         maxes = np.array([f.max for f in self.factors.values()])
         span = np.array([f.span for f in self.factors.values()])
-
         centers = np.array([f.center for f in self.factors.values()])
-        factor_matrix = self._design_matrix * (span / 2) + centers
+        factor_matrix = self._design_matrix * (span / 2.0) + centers
 
         # Check if current settings are outside allowed design space.
+        # Also, for factors that are specified as ordinal, adjust their values
+        # in the design matrix to be rounded floats
+        for i, factor in enumerate(self.factors.values()):
+            if factor.type == 'ordinal':
+                factor_matrix[:,i] = np.round(factor_matrix[:,i])
+
         if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
             if self._edge_action == 'distort':
 
@@ -162,7 +216,6 @@ class ExperimentDesigner(BaseExperimentDesigner):
         :returns: Calculated optimum.
         :rtype: OptimizationResult
         """
-        print(response)
         if response.shape[1] == 1:
             criterion = list(self.responses.values())[0]['criterion']
         else:
@@ -174,9 +227,9 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        factor_info = [(f.span, f.current_high, f.current_low, f.center)
+        factor_info = [(f.span, f.current_high, f.current_low, f.center, f.type)
                        for f in self.factors.values()]
-        spans, old_highs, old_lows, centers = map(np.array, zip(*factor_info))
+        spans, old_highs, old_lows, centers, types = map(np.array, zip(*factor_info))
         ratios = (old_highs - optimal_x) / spans
 
         if np.logical_and(ratios > tol, ratios < 1 - tol).all():
@@ -193,8 +246,9 @@ class ExperimentDesigner(BaseExperimentDesigner):
             else:
                 new_center = optimal_x
 
-            new_highs = new_center + spans / 2
-            new_lows = new_center - spans / 2
+            # Calculate the new highs and lows. Adjust the odrinal factors' values here.
+            new_highs = [int(round(new_center[i]) + round(spans[i] / 2.0)) if factor_type=='ordinal' else new_center[i] + spans / 2.0 for i, factor_type in enumerate(types)]
+            new_lows = [int(round(new_center[i]) - round(spans[i] / 2.0)) if factor_type=='ordinal' else new_center[i] - spans / 2.0 for i, factor_type in enumerate(types)]
             for i, key in enumerate(self._design_sheet.columns):
                 self.factors[key].current_high = new_highs[i]
                 self.factors[key].current_low = new_lows[i]
@@ -414,7 +468,7 @@ def predict_optimum(design_sheet, response, criterion, factors, degree=2):
 
             # Calculate response.
             factor_contributions = np.multiply(factors, coefficients)
-            return (-1 if invert else 1) * factor_contributions.sum()  
+            return (-1 if invert else 1) * factor_contributions.sum()
 
         # Since factors are set according to design the optimum is already
         # guessed to be at the center of the design. Hence, use medians as
