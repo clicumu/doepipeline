@@ -7,7 +7,6 @@ import sys
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
-from types import IntType
 try:
     import pymoddeq
 except ImportError:
@@ -50,16 +49,16 @@ class QuantitativeFactor(NumericFactor):
 class OrdinalFactor(NumericFactor):
 
     def __init__(self, factor_type, factor_max, factor_min):
-        assert type(factor_max) is IntType or factor_max != float('inf'), \
+        assert type(factor_max) is int or factor_max != float('inf'), \
             "factor_max is not an integer: {}".format(factor_max)
-        assert type(factor_min) is IntType or factor_min != float('-inf'), \
+        assert type(factor_min) is int or factor_min != float('-inf'), \
             "factor_min is not an integer: {}".format(factor_min)
         self.int_attributes = ("current_low", "current_high")
         super(OrdinalFactor, self).__init__(factor_type, factor_max, factor_min)
 
     def __setattr__(self, attribute, value):
         if attribute in self.int_attributes:
-            assert type(attribute) is IntType, \
+            assert type(attribute) is int, \
                 "{} data type must be integer for an Ordinal Factor, was {}.".format(attribute, type(value))
         super(OrdinalFactor, self).__setattr__(self, attribute, value)
 
