@@ -120,7 +120,7 @@ class BaseExperimentDesigner:
             f_min = f_spec.get('min', float('-inf') if has_neg else 0)
             f_max = f_spec.get('max', float('inf'))
             f_type = f_spec.get('type', 'quantitative')
-            factor = Factor(f_max, f_min, f_type)
+            factor = Factor(f_type, f_max, f_min)
             factor.current_high = int(f_spec['high_init']) if f_type == 'ordinal' else f_spec['high_init']
             factor.current_low = int(f_spec['low_init']) if f_type == 'ordinal' else f_spec['low_init']
             self.factors[factor_name] = factor
