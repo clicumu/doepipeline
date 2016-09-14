@@ -6,6 +6,7 @@ import os
 from doepipeline.designer import BaseExperimentDesigner, ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
 
+## TODO: Running pipeline from windows comp on uppmax (slurm) results in working directories such as basename1, basename2,..., basenameN, instead of basename/1, basename/2... this is due to the line in _update_working_directory where the working directory and current iteration is joined through os.path.join. Must check remote OS before creating the path ($ uname -a).
 
 class PipelineGenerator:
 
