@@ -79,10 +79,14 @@ def Factor(factor_type, *args, **kwargs):
     :rtype: Class instance.
     :raises: UnsupportedFactorType
     """
-    if factor_type.lower() == "quantitative": return QuantitativeFactor(factor_type, *args, **kwargs)
-    elif factor_type.lower() == "ordinal": return OrdinalFactor(factor_type, *args, **kwargs)
-    elif factor_type.lower() == "categorical": return CategoricalFactor(factor_type, *args, **kwargs)
-    else: raise UnsupportedFactorType
+    if factor_type.lower() == "quantitative":
+        return QuantitativeFactor(factor_type, *args, **kwargs)
+    elif factor_type.lower() == "ordinal":
+        return OrdinalFactor(factor_type, *args, **kwargs)
+    elif factor_type.lower() == "categorical":
+        return CategoricalFactor(factor_type, *args, **kwargs)
+    else:
+        raise UnsupportedFactorType
 
 
 class UnsupportedFactorType(Exception):
