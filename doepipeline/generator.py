@@ -44,7 +44,6 @@ class PipelineGenerator:
             parse_job_to_template_string(job, specials, path_sep) for job in jobs
         ]
         self._factors = config['design']['factors']
-        print(self._config['working_directory'])
 
     def _update_working_directory(self):
         workdir = os.path.join(self._config.get('base_directory', '.'), str(self._current_iteration))
@@ -122,7 +121,7 @@ class PipelineGenerator:
                 for factor_name in script_factors:
                     factor_type = self._factors[factor_name].get('type', 'quantitative')
                     factor_value = experiment[factor_name]
-                    replacement[factor_name] = int(factor_value) if factor_type == 'ordinal' else factor_value
+                    replacement[factor_name] = int(factor_value) if factor_type.lower() == 'ordinal' else factor_value
 
                 # Replace the factor placeholders with the factor values
                 script = script.format(**replacement)
@@ -201,7 +200,7 @@ class PipelineGenerator:
             assert all(key in allowed_factor_keys for key in factor_settings),\
                 'invalid key, allowed keys for factors: {}'.format(allowed_factor_keys)
             if 'type' in factor_settings:
-                assert factor_settings['type'] in allowed_factor_types,\
+                assert factor_settings['type'].lower() in allowed_factor_types,\
                     '"type" must be one of {}, error in factor {}'.format(allowed_factor_types, key)
 
         # Check that responses are specified.
