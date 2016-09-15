@@ -49,23 +49,25 @@ class QuantitativeFactor(NumericFactor):
 class OrdinalFactor(NumericFactor):
 
     def __init__(self, factor_type, factor_max, factor_min):
-        assert type(factor_max) is int or factor_max != float('inf'), \
+        # factor_max and factor_min must be ints or of type -/+ inf
+        assert type(factor_max) is int or factor_max == float('inf'), \
             "factor_max is not an integer: {}".format(factor_max)
-        assert type(factor_min) is int or factor_min != float('-inf'), \
+        assert type(factor_min) is int or factor_min == float('-inf'), \
             "factor_min is not an integer: {}".format(factor_min)
-        self.int_attributes = ("current_low", "current_high")
         super(OrdinalFactor, self).__init__(factor_type, factor_max, factor_min)
 
     def __setattr__(self, attribute, value):
-        if attribute in self.int_attributes:
-            assert type(attribute) is int, \
+        int_attributes = ("current_low", "current_high")
+        # allow attributes in int_attributes to only take int values, or None
+        if attribute in int_attributes and value is not None:
+            assert type(value) is int, \
                 "{} data type must be integer for an Ordinal Factor, was {}.".format(attribute, type(value))
-        super(OrdinalFactor, self).__setattr__(self, attribute, value)
+        super(OrdinalFactor, self).__setattr__(attribute, value)
 
 
 class CategoricalFactor:
-    
-    def __init__(self, categories):
+
+    def __init__(self, *args, **kwargs):
         raise NotImplementedError
     
 
