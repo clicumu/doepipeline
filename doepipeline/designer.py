@@ -17,12 +17,33 @@ else:
     has_modde = True
 
 
-OptimizationResult = namedtuple('OptimizationResult', ['predicted_optimum',
-                                                       'converged',
-                                                       'tol'])
+class OptimizationResult(namedtuple(
+    'OptimizationResult', ['predicted_optimum', 'converged', 'tol'])):
+    """ `namedtuple` encapsulating results from optimization. """
+
+
+class UnsupportedFactorType(Exception):
+    pass
+
+
+class UnsupportedDesign(Exception):
+    pass
+
+
+class OptimizationFailed(Exception):
+    pass
 
 
 class NumericFactor:
+
+    """ Base class for numeric factors.
+
+    Simple class which encapsulates current settings and allowed
+    max and min.
+
+    Can't be instantiated.
+    """
+    type = None
 
     def __init__(self, factor_max, factor_min):
         if type(self) == NumericFactor:
@@ -35,19 +56,28 @@ class NumericFactor:
 
     @property
     def span(self):
+        """ Distance between current high and low. """
         return self.current_high - self.current_low
 
     @property
     def center(self):
+        """ Mean value of current high and low. """
         return (self.current_high + self.current_low) / 2.0
 
 
 class QuantitativeFactor(NumericFactor):
 
+    """ Real value factors. """
+
     type = 'quantitative'
 
 
 class OrdinalFactor(NumericFactor):
+
+    """ Ordinal (integer) factors.
+
+    Attributes are checked to be integers (or None/inf if allowed).
+    """
 
     type = 'ordinal'
 
@@ -79,40 +109,12 @@ class OrdinalFactor(NumericFactor):
 
 class CategoricalFactor:
 
+    """ Multilevel categorical factors. """
+
     type = 'categorical'
 
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
-    
-
-def Factor(factor_type, *args, **kwargs):
-    """ Factory function stratified by the factor_type parameter
-
-    :param str factor_type: The factor type (ordinal, quantitative, categorical).
-    :returns: Function corresponding to `factor_type`.
-    :rtype: QuantitativeFactor, OrdinalFactor, CategoricalFactor.
-    :raises: UnsupportedFactorType
-    """
-    if factor_type.lower() == "quantitative":
-        return QuantitativeFactor(*args, **kwargs)
-    elif factor_type.lower() == "ordinal":
-        return OrdinalFactor(*args, **kwargs)
-    elif factor_type.lower() == "categorical":
-        return CategoricalFactor(*args, **kwargs)
-    else:
-        raise UnsupportedFactorType(str(factor_type))
-
-
-class UnsupportedFactorType(Exception):
-    pass
-
-
-class UnsupportedDesign(Exception):
-    pass
-
-
-class OptimizationFailed(Exception):
-    pass
 
 
 class BaseExperimentDesigner:
@@ -265,8 +267,17 @@ class ExperimentDesigner(BaseExperimentDesigner):
                 new_center = optimal_x
 
             # Calculate the new highs and lows. Adjust the odrinal factors' values here.
-            new_highs = [int(round(new_center[i]) + round(spans[i] / 2.0)) if factor_type=='ordinal' else new_center[i] + spans / 2.0 for i, factor_type in enumerate(types)]
-            new_lows = [int(round(new_center[i]) - round(spans[i] / 2.0)) if factor_type=='ordinal' else new_center[i] - spans / 2.0 for i, factor_type in enumerate(types)]
+            # FIXME: Should really new_center and spans be rounded before added?
+            new_highs = [
+                int(round(new_center[i]) + round(spans[i] / 2.0))
+                if factor_type == 'ordinal' else new_center[i] + spans / 2.0
+                for i, factor_type in enumerate(types)
+            ]
+            new_lows = [
+                int(round(new_center[i]) - round(spans[i] / 2.0))
+                if factor_type == 'ordinal' else new_center[i] - spans / 2.0
+                for i, factor_type in enumerate(types)
+            ]
             for i, key in enumerate(self._design_sheet.columns):
                 self.factors[key].current_high = new_highs[i]
                 self.factors[key].current_low = new_lows[i]
@@ -403,11 +414,29 @@ if has_modde:
     ModdeQDesigner = _ModdeQDesigner
 
 
+def Factor(factor_type, *args, **kwargs):
+    """ Factory function stratified by the factor_type parameter
+
+    :param str factor_type: The factor type (ordinal, quantitative, categorical).
+    :returns: Function corresponding to `factor_type`.
+    :rtype: QuantitativeFactor, OrdinalFactor, CategoricalFactor.
+    :raises: UnsupportedFactorType
+    """
+    if factor_type.lower() == "quantitative":
+        return QuantitativeFactor(*args, **kwargs)
+    elif factor_type.lower() == "ordinal":
+        return OrdinalFactor(*args, **kwargs)
+    elif factor_type.lower() == "categorical":
+        return CategoricalFactor(*args, **kwargs)
+    else:
+        raise UnsupportedFactorType(str(factor_type))
+
+
 def make_desirability_function(response):
     """ Define a Derringer and Suich desirability function.
 
-    :param response_dict:
-    :return:
+    :param dict response_dict: Response variable config dictionary.
+    :return: desirability function.
     :rtype: Callable
     """
     s = response.get('priority', 1)
@@ -419,7 +448,7 @@ def make_desirability_function(response):
         def desirability(y):
             if y < L or U < y:
                 return 0
-            elif  L <= y <= T:
+            elif L <= y <= T:
                 return ((y - L) / (T - L)) ** s
             elif T <= y <= U:
                 return ((y - U) / (T - U)) ** s
@@ -447,6 +476,9 @@ def make_desirability_function(response):
                 return 0
             else:
                 return ((y - U) / (T - U)) ** s
+
+    else:
+        raise ValueError(response['criterion'])
 
     return desirability
 
