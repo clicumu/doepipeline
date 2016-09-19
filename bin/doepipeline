@@ -8,7 +8,6 @@ import getpass
 import os
 import sys
 import platform
-sys.path.insert(0, os.path.abspath('../doepipeline'))  # TODO: Remote this.
 from doepipeline.executor import SSHExecutor, LocalExecutor
 from doepipeline.generator import PipelineGenerator
 
