@@ -5,7 +5,7 @@ except ImportError:
     import mock
 
 from doepipeline.executor.base import CommandError, PipelineRunFailed
-from doepipeline.executor import BaseLocalExecutor
+from doepipeline.executor import LocalPipelineExecutor
 from doepipeline.tests.executor_utils import  *
 
 
@@ -72,7 +72,7 @@ class TestBaseExecutorSetup(ExecutorTestCase):
                     has_run['yes'] = True
                     raise CommandError
 
-            executor._cd = types.MethodType(_cd, executor)
+            executor.change_dir = types.MethodType(_cd, executor)
 
             executor.run_pipeline_collection(self.pipeline)
             expected_scripts = [
@@ -314,14 +314,14 @@ class TestLocalExecutor(ExecutorTestCase):
 
     @mock.patch('subprocess.Popen')
     def test_Popen_is_called_when_command_executes(self, mock_popen):
-        executor = BaseLocalExecutor()
+        executor = LocalPipelineExecutor()
         command = 'hello'
         executor.execute_command(command)
         mock_popen.assert_called_with(command, shell=True)
 
     @mock.patch('subprocess.Popen')
     def test_process_saved_when_command_called_with_watch(self, mock_popen):
-        executor = BaseLocalExecutor()
+        executor = LocalPipelineExecutor()
         command = 'hello'
         job_name = 'name'
         executor.execute_command(command, watch=True, job_name=job_name)
@@ -331,7 +331,7 @@ class TestLocalExecutor(ExecutorTestCase):
 
     @mock.patch('subprocess.Popen')
     def test_Popen_is_not_called_with_bad_command(self, mock_popen):
-        executor = BaseLocalExecutor()
+        executor = LocalPipelineExecutor()
         bad_commands = [
             '',
             0,
@@ -351,12 +351,12 @@ class TestLocalExecutor(ExecutorTestCase):
         mock_popen.return_value.poll.return_value = -1
         mock_popen.return_value.return_code = -1
 
-        batch_executor = BaseLocalExecutor(run_in_batch=True)
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
         self.assertRaises(PipelineRunFailed,
                           batch_executor.run_pipeline_collection,
                           self.pipeline)
 
-        screen_executor = BaseLocalExecutor()
+        screen_executor = LocalPipelineExecutor()
         self.assertRaises(PipelineRunFailed,
                           screen_executor.run_pipeline_collection,
                           self.pipeline)
@@ -368,13 +368,13 @@ class TestLocalExecutor(ExecutorTestCase):
         mock_popen.return_value.poll.return_value = 0
         mock_popen.return_value.return_code = 0
 
-        batch_executor = BaseLocalExecutor(run_in_batch=True)
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
         batch_executor.run_pipeline_collection(self.pipeline)
 
         self.assertEqual(len(batch_executor.running_jobs), 0)
         self.assertFalse(mock_sleep.called)
 
-        screen_executor = BaseLocalExecutor()
+        screen_executor = LocalPipelineExecutor()
         screen_executor.run_pipeline_collection(self.pipeline)
 
         self.assertEqual(len(screen_executor.running_jobs), 0)
@@ -397,7 +397,7 @@ class TestLocalExecutor(ExecutorTestCase):
 
         mock_popen.return_value.poll = poll
 
-        batch_executor = BaseLocalExecutor(run_in_batch=True)
+        batch_executor = LocalPipelineExecutor(run_in_batch=True)
         batch_executor.run_pipeline_collection(self.pipeline)
 
         # Called twice for first step and once for second.
@@ -406,7 +406,7 @@ class TestLocalExecutor(ExecutorTestCase):
         polled['yes'] = False
         polled['calls'] = 0
 
-        screen_executor = BaseLocalExecutor(run_in_batch=True)
+        screen_executor = LocalPipelineExecutor(run_in_batch=True)
         screen_executor.run_pipeline_collection(self.pipeline)
 
         # Called twice for first step and once for second.

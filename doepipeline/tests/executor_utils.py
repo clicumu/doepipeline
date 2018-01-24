@@ -4,7 +4,6 @@ import copy
 from collections import Sequence
 
 from doepipeline.executor.base import BasePipelineExecutor
-from doepipeline.executor.mixins import ScreenExecutorMixin, BatchExecutorMixin
 from doepipeline.generator import PipelineGenerator
 
 
@@ -34,14 +33,6 @@ class MockBaseExecutor(BasePipelineExecutor):
 
     def read_file_contents(self, file_name):
         return 'A,1\nB,2'
-
-
-class MockBatchExecutor(BatchExecutorMixin, MockBaseExecutor):
-    pass
-
-
-class MockScreenExecutor(ScreenExecutorMixin, MockBaseExecutor):
-    pass
 
 
 class ExecutorTestCase(unittest.TestCase):

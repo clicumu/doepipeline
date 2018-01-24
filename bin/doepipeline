@@ -8,7 +8,7 @@ import getpass
 import os
 import sys
 import platform
-from doepipeline.executor import SSHExecutor, LocalExecutor
+from doepipeline.executor import SSHExecutor, LocalPipelineExecutor
 from doepipeline.generator import PipelineGenerator
 
 
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         executor_class = lambda *a, **kw: SSHExecutor(auth, *a, **kw)
         sep = '/'
     else:
-        executor_class = LocalExecutor
+        executor_class = LocalPipelineExecutor
         if platform.system() == 'Windows':
             sep = '\\'
         else:

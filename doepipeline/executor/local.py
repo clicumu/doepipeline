@@ -4,21 +4,22 @@ a Linux-shell.
 """
 import subprocess
 import os
+from collections import OrderedDict
 
-from .base import BasePipelineExecutor, CommandError
-from .mixins import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
+from .base import BasePipelineExecutor, CommandError, PipelineRunFailed
 
 
-class BaseLocalExecutor(BasePipelineExecutor):
-
+class LocalPipelineExecutor(BasePipelineExecutor):
     """
     Executor class running pipeline locally in a linux shell.
     """
-    def __init__(self, run_in_batch=False, *args, **kwargs):
-        super(BaseLocalExecutor, self).__init__(*args, **kwargs)
-        assert isinstance(run_in_batch, bool), 'run_in_batch must be boolean'
-
-        self.run_in_batch = run_in_batch
+    def __init__(self, *args, base_command=None, run_serial=True, **kwargs):
+        if base_command is None:
+            base_command = '{script} > {logfile}'
+        super(LocalPipelineExecutor, self).__init__(*args,
+                                                    base_command=base_command,
+                                                    **kwargs)
+        self.run_serial = run_serial
         self.running_jobs = dict()
 
     def poll_jobs(self):
@@ -49,8 +50,8 @@ class BaseLocalExecutor(BasePipelineExecutor):
         :param bool watch: If True, monitor process.
         :param kwargs: Keyword-arguments.
         """
-        super(BaseLocalExecutor, self).execute_command(command, watch,
-                                                       **kwargs)
+        super(LocalPipelineExecutor, self).execute_command(command, watch,
+                                                           **kwargs)
         if watch:
             try:
                 process = subprocess.Popen(command, shell=True)
@@ -67,28 +68,6 @@ class BaseLocalExecutor(BasePipelineExecutor):
             except OSError as e:
                 raise CommandError(str(e))
 
-
-class LocalBatchExecutor(BatchExecutorMixin, BaseLocalExecutor):
-
-    def poll_jobs(self):
-        return BaseLocalExecutor.poll_jobs(self)
-
-
-class LocalScreenExecutor(ScreenExecutorMixin, BaseLocalExecutor):
-
-    def poll_jobs(self):
-        return BaseLocalExecutor.poll_jobs(self)
-
-
-class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
-    """ Executor class which runs jobs serially locally. """
-
-    def execute_command(self, command, watch=False, wait=False, **kwargs):
-        try:
-            subprocess.call(command, shell=True)
-        except Exception as e:
-            raise CommandError('"{0}": {1}'.format(command, str(e)))
-
     def read_file_contents(self, file_name, **kwargs):
         """ Read contents of local file.
 
@@ -101,19 +80,53 @@ class LocalSerialExecutor(SerialExecutorMixin, BasePipelineExecutor):
 
         return contents
 
-    def _cd(self, dir, **kwargs):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
+        """ Run all scripts.
+
+        :param job_steps: List of step-wise scripts.
+        :type job_steps: OrderedDict[key, list]
+        :param experiment_index: List of job-names.
+        :type experiment_index: list[str]
+        :param env_variables: dictionary of environment variables to set.
+        :type env_variables: dict
+        """
+        assert isinstance(job_steps, OrderedDict), 'job_steps must be ordered'
+        self.set_env_variables(env_variables)
+
+        for i, step in enumerate(job_steps.values(), start=1):
+            for script, job_name in zip(step, experiment_index):
+                log_file = self.base_log.format(name=job_name, i=i)
+                self.change_dir(job_name, job_name=job_name)
+                try:
+                    command = self.base_command.format(script=script)
+                except KeyError:
+                    has_log = True
+                    command = self.base_command.format(script=script,
+                                                       logfile=log_file)
+                else:
+                    has_log = False
+
+                if has_log:
+                    self.touch_file(log_file)
+
+                try:
+                    self.execute_command(command, wait=self.run_serial,
+                                         watch=True, job_name=job_name)
+                except CommandError as e:
+                    raise PipelineRunFailed(str(e))
+
+                self.change_dir('..', job_name=job_name)
+
+    def touch_file(self, file_name, times=None):
+        with open(file_name, 'a'):
+            os.utime(file_name, times=times)
+
+    def make_dir(self, dir, **kwargs):
+        os.makedirs(dir, **kwargs)
+
+    def change_dir(self, dir, **kwargs):
         os.chdir(dir)
 
-
-def LocalExecutor(*args, execution_type='serial', **kwargs):
-    if execution_type == 'serial':
-        return LocalSerialExecutor(*args, **kwargs)
-
-    elif execution_type == 'screen':
-        return LocalScreenExecutor(*args, **kwargs)
-
-    elif execution_type == 'batch':
-        return LocalBatchExecutor(*args, **kwargs)
-
-    else:
-        raise ValueError('unknown execution_type: {0}'.format(execution_type))
+    def set_env_variables(self, env_variables):
+        for key, value in env_variables.items():
+            os.environ[key] = value
