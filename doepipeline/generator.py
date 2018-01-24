@@ -6,7 +6,6 @@ import os
 from doepipeline.designer import BaseExperimentDesigner, ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
 
-## TODO: Running pipeline from windows comp on uppmax (slurm) results in working directories such as basename1, basename2,..., basenameN, instead of basename/1, basename/2... this is due to the line in _update_working_directory where the working directory and current iteration is joined through os.path.join. Must check remote OS before creating the path ($ uname -a).
 
 class PipelineGenerator:
 
@@ -159,33 +158,15 @@ class PipelineGenerator:
         reserved_terms = ('before_run', 'pipeline', 'design',
                           'results_file', 'working_directory', 'SLURM')
         valid_before = 'environment_variables', 'scripts'
+
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'
         assert 'results_file', 'collect_results missing'
+        assert 'working_directory' in config_dict, 'working directory missing'
 
         job_names = config_dict['pipeline']
-        assert isinstance(job_names, list), 'pipeline must be listing'
-        assert all(job in config_dict for job in job_names),\
-            'all jobs in pipeline must be specified'
-        assert all(term in job_names for term in config_dict
-                   if term not in reserved_terms), 'all specified jobs must be in pipeline'
-
-        if 'before_run' in config_dict:
-            before = config_dict['before_run']
-            assert all(key in valid_before for key in before),\
-                'invalid key, allowed before_run: {}'.format(', '.join(valid_before))
-            if 'scripts' in before:
-                assert isinstance(before['scripts'], list),\
-                    'before_run scripts must be a list of strings'
-                assert all(isinstance(script, str)\
-                           for script in before['scripts']),\
-                    'before_run scripts must be a list of strings'
-            if 'environment_variables' in before:
-                assert isinstance(before['environment_variables'], dict),\
-                    'environment_variables must be key-value-pairs'
-                assert all(isinstance(value, str) for value\
-                           in before['environment_variables'].values()),\
-                    'environment_variables values must be strings'
+        _validate_job_list_config(config_dict, job_names, reserved_terms)
+        _validate_setup_scrip_config(config_dict, valid_before)
 
         design = config_dict['design']
         allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type', 'numeric_type'
@@ -195,67 +176,90 @@ class PipelineGenerator:
         assert 'responses' in design, 'design responses is missing'
         design_factors = design['factors']
         design_responses = design['responses']
-        # Check that factors are specified.
-        for key, factor_settings in design_factors.items():
-            assert all(key in allowed_factor_keys for key in factor_settings),\
-                'invalid key, allowed keys for factors: {}'.format(allowed_factor_keys)
-            if 'type' in factor_settings:
-                assert factor_settings['type'].lower() in allowed_factor_types,\
-                    '"type" must be one of {}, error in factor {}'.format(allowed_factor_types, key)
 
-        # Check that responses are specified.
-        assert isinstance(design_responses, dict),\
-            'design responses must be key-value-pairs'
-        assert all(isinstance(target, dict) for target in design_responses.values()),\
-            'design responses optimization goal must be key-value mappings'
+        _validate_factor_config(allowed_factor_keys,
+                                allowed_factor_types,
+                                config_dict,
+                                design_factors,
+                                job_names)
 
-        jobs = [config_dict[job_name] for job_name in job_names]
+        _validate_response_config(design_responses)
 
-        # Check existence of scripts and that they are simple strings.
-        assert all('script' in job for job in jobs), 'all jobs must have script'
-        assert all(isinstance(job['script'], str) for job in jobs),\
-            'job scripts must be strings'
 
-        job_w_factors = [job for job in jobs if 'factors' in job]
+def _validate_job_list_config(config_dict, job_names, reserved_terms):
+    assert isinstance(job_names, list), 'pipeline must be listing'
+    assert all(job in config_dict for job in job_names), \
+        'all jobs in pipeline must be specified'
+    assert all(term in job_names for term in config_dict
+               if
+               term not in reserved_terms), 'all specified jobs must be in pipeline'
 
-        # Check factors are dicts.
-        assert all(all(isinstance(factor, dict) for factor in job['factors'].values())\
-                   for job in job_w_factors), 'job factors must be key-value-pairs'
-        assert all(all(factor in design_factors for factor in job['factors'].keys())\
-                   for job in job_w_factors), 'job factors must be specified in design'
 
-        # Check factors either script_option or substituted.
-        for job in job_w_factors:
-            assert any(['script_option' in factor, 'substitute' in factor]\
-                       for factor in job['factors']),\
+def _validate_response_config(design_responses):
+    # Check that responses are specified.
+    assert isinstance(design_responses, dict), \
+        'design responses must be key-value-pairs'
+    assert all(
+        isinstance(target, dict) for target in design_responses.values()), \
+        'design responses optimization goal must be key-value mappings'
+
+def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
+                            config_dict, design_factors, job_names):
+    # Check that factors are specified.
+    for key, factor_settings in design_factors.items():
+        assert all(key in allowed_factor_keys for key in factor_settings), \
+            'invalid key, allowed keys for factors: {}'.format(
+                allowed_factor_keys)
+        if 'type' in factor_settings:
+            assert factor_settings['type'].lower() in allowed_factor_types, \
+                '"type" must be one of {}, error in factor {}'.format(
+                    allowed_factor_types, key)
+    jobs = [config_dict[job_name] for job_name in job_names]
+    # Check existence of scripts and that they are simple strings.
+    assert all('script' in job for job in jobs), 'all jobs must have script'
+    assert all(isinstance(job['script'], str) for job in jobs), \
+        'job scripts must be strings'
+    job_w_factors = [job for job in jobs if 'factors' in job]
+    # Check factors are dicts.
+    assert all(
+        all(isinstance(factor, dict) for factor in job['factors'].values()) \
+        for job in job_w_factors), 'job factors must be key-value-pairs'
+    assert all(
+        all(factor in design_factors for factor in job['factors'].keys()) \
+        for job in job_w_factors), 'job factors must be specified in design'
+    # Check factors either script_option or substituted.
+    for job in job_w_factors:
+        assert any(['script_option' in factor, 'substitute' in factor] \
+                   for factor in job['factors']), \
             'factors must be added as script option or substituted'
 
-        # Get jobs with substitution
-        job_w_sub = [job for job in job_w_factors if\
-                     any('substitute' in factor for factor in job['factors'].values())]
+    # Get jobs with substitution
+    job_w_sub = [job for job in job_w_factors if \
+                 any('substitute' in factor for factor in
+                     job['factors'].values())]
+    # Assert that substitution-factors can be substituted.
+    for job in job_w_sub:
+        msg = 'substituted factors must be templated in script-string'
+        assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script']) \
+                   for fac, fac_d in job['factors'].items() \
+                   if fac_d.get('substitute', False)), msg
 
-        # Assert that substitution-factors can be substituted.
-        for job in job_w_sub:
-            msg = 'substituted factors must be templated in script-string'
-            assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script'])\
-                       for fac, fac_d in job['factors'].items()\
-                       if fac_d.get('substitute', False)), msg
 
-        # Check SLURM-specifics.
-        if any('SLURM' in job.keys() for job in jobs):
-            assert 'SLURM' in config_dict, \
-                "at least one job specified with SLURM but no SLURM entry found in config file"
-
-        if 'SLURM' in config_dict:
-            assert 'account_name' in config_dict['SLURM'],\
-                'SLURM account name required'
-
-            for job in (j for j in jobs if 'SLURM' in j):
-                assert 'SLURM' in job,\
-                    'All jobs must have SLURM-settings specified'
-                assert 'p' in job['SLURM'] and job['SLURM']['p'],\
-                    'job type must be set (-p)'
-                assert 'n' in job['SLURM'] and job['SLURM']['n'],\
-                    'job cores/nodes must be set (-n)'
-                assert 't' in job['SLURM'] and job['SLURM']['t'],\
-                    'job time must be set (-t)'
+def _validate_setup_scrip_config(config_dict, valid_before):
+    if 'before_run' in config_dict:
+        before = config_dict['before_run']
+        assert all(key in valid_before for key in before), \
+            'invalid key, allowed before_run: {}'.format(
+                ', '.join(valid_before))
+        if 'scripts' in before:
+            assert isinstance(before['scripts'], list), \
+                'before_run scripts must be a list of strings'
+            assert all(isinstance(script, str) \
+                       for script in before['scripts']), \
+                'before_run scripts must be a list of strings'
+        if 'environment_variables' in before:
+            assert isinstance(before['environment_variables'], dict), \
+                'environment_variables must be key-value-pairs'
+            assert all(isinstance(value, str) for value \
+                       in before['environment_variables'].values()), \
+                'environment_variables values must be strings'
