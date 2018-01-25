@@ -38,7 +38,8 @@ class PipelineGenerator:
         self._update_working_directory()
 
         specials = {'results_file': self._config['results_file'],
-                    'WORKDIR': self._config['working_directory']}
+                    'WORKDIR': self._config['working_directory'],
+                    'BASEDIR': self._config['base_directory']}
         self._scripts_templates = [
             parse_job_to_template_string(job, specials, path_sep) for job in jobs
         ]

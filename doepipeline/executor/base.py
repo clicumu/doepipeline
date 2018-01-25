@@ -197,17 +197,7 @@ class BasePipelineExecutor(object):
         self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)
 
         # Step into each work folder and collect pipeline results.
-        results = dict()
-        for job_name in experiment_index:
-            self.change_dir(job_name)
-            file_name = pipeline_collection['RESULTS_FILE']
-            contents = self.read_file_contents(file_name, job_name=job_name)
-            f_handle = StringIO(contents)
-            current_results = pd.Series.from_csv(f_handle)
-            results[job_name] = current_results
-            self.change_dir('..')
-
-        return pd.DataFrame(results).T
+        return self._parse_results_file(experiment_index, pipeline_collection)
 
     @abc.abstractmethod
     def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
@@ -220,12 +210,13 @@ class BasePipelineExecutor(object):
         """
 
     @abc.abstractmethod
-    def read_file_contents(self, file_name, **kwargs):
+    def read_file_contents(self, file_name, directory=None, **kwargs):
         """ Abstract method.
 
         Override to specify how to read file contents.
 
         :param str file_name: Path of file.
+        :param str directory: Directory containing `file_name`
         :return: File-contents
         :rtype: str
         """
@@ -264,3 +255,13 @@ class BasePipelineExecutor(object):
 
     def make_dir(self, dir, **kwargs):
         self.execute_command('mkdir {}'.format(dir), **kwargs)
+
+    def _parse_results_file(self, experiment_index, pipeline_collection):
+        results = dict()
+        for job_name in experiment_index:
+            file_name = pipeline_collection['RESULTS_FILE']
+            contents = self.read_file_contents(file_name, directory=job_name)
+            f_handle = StringIO(contents)
+            current_results = pd.Series.from_csv(f_handle)
+            results[job_name] = current_results
+        return pd.DataFrame(results).T
