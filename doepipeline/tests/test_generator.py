@@ -51,6 +51,7 @@ class BaseGeneratorTestCase(unittest.TestCase):
         self.outfile = 'my_results.txt'
 
         self.config = {
+            'working_directory': os.getcwd(),
             'results_file': self.outfile,
             'design': self.design_spec,
             'before_run': {'environment_variables': {'MYPATH': '~/a/path'}},
@@ -112,7 +113,9 @@ class TestMakePipeline(BaseGeneratorTestCase):
         expected = {
             '0': self.scripts1, '1': self.scripts2,
             'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
-            'RESULTS_FILE': self.config['results_file']
+            'RESULTS_FILE': self.config['results_file'],
+            'WORKDIR': self.config['working_directory'],
+            'JOBNAMES': ['ScriptWithOptions', 'ScriptWithSub']
         }
         self.assertDictEqual(expected,
                              pipeline_collection)
@@ -123,9 +126,11 @@ class TestMakePipeline(BaseGeneratorTestCase):
         expected = {
             'A': self.scripts1, 'B': self.scripts2,
             'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
-            'RESULTS_FILE': self.config['results_file']
+            'RESULTS_FILE': self.config['results_file'],
+            'WORKDIR': self.config['working_directory'],
+            'JOBNAMES': ['ScriptWithOptions', 'ScriptWithSub']
         }
         self.assertDictEqual(
             expected,
-             new_collection)
+            new_collection)
 
