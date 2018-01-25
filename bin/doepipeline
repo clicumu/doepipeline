@@ -8,7 +8,7 @@ import getpass
 import os
 import sys
 import platform
-from doepipeline.executor import SSHExecutor, LocalPipelineExecutor
+from doepipeline.executor import LocalPipelineExecutor
 from doepipeline.generator import PipelineGenerator
 
 
@@ -61,59 +61,12 @@ def make_parser():
     parser.add_argument('-o', '--output', default='optimal_parameters.csv',
                         help='output file (default: optimal_parameters.csv)')
 
-    # ---------------- Add sub-parsers.
-    subparsers = parser.add_subparsers(title='program', dest='program',
-                                       help='execution mode')
-    subparsers.required = True
-    subparsers.add_parser('local')
-
-    # -------------- Connection arguments for remote parser
-    remote_parser = subparsers.add_parser('remote')
-
-    remote_parser.add_argument('user', help='user at HOST')
-    remote_parser.add_argument('host', help='host to connect to.')
-    remote_parser.add_argument('-k', '--key',
-                               help=('public key file (key or path to key-file)'
-                                     '. If provided SSH-authentication will be '
-                                     'performed using provided key.'))
-    remote_parser.add_argument('-p', '--password', action='store_true',
-                               default=False,
-                               help=('if this flag is set, the user will be '
-                                     'prompted for password when connection '
-                                     'with SSH to HOST.'))
-
     return parser
 
 
 if __name__ == '__main__':
     parser = make_parser()
     args = parser.parse_args()
-
-    if args.program == 'remote':
-        host = args.host
-        user = args.user
-
-        auth = {
-            'hostname': host,
-            'username': user,
-        }
-        if args.password:
-            prompt = "{0}@{1}'s password: ".format(user, host)
-            auth['password'] = getpass.getpass(prompt)
-        if args.key:
-            if os.path.isfile(args.key):
-                auth['key_filename'] = args.key
-            else:
-                auth['pkey'] = args.key
-
-        executor_class = lambda *a, **kw: SSHExecutor(auth, *a, **kw)
-        sep = '/'
-    else:
-        executor_class = LocalPipelineExecutor
-        if platform.system() == 'Windows':
-            sep = '\\'
-        else:
-            sep = '/'
 
     try:
         generator = PipelineGenerator.from_yaml(args.config)
@@ -126,8 +79,8 @@ if __name__ == '__main__':
     while n_iter < args.maxiter:
         n_iter += 1
 
-        iter_workdir = sep.join((args.workdir, 'iter_'.format(n_iter)))
-        executor = executor_class(
+        iter_workdir = os.path.join((args.workdir, 'iter_'.format(n_iter)))
+        executor = LocalPipelineExecutor(
             execution_type=args.execution, workdir=iter_workdir,
             base_command='{script}')
 
