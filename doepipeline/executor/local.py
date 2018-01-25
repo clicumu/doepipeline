@@ -24,11 +24,11 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
     def poll_jobs(self):
         still_running = list()
-        for job_name, process in self.running_jobs.items():
+        for job_name, process in dict(self.running_jobs).items():
             if process.poll() is None:
                 still_running.append(job_name)
             else:
-                if process.return_code != 0:
+                if process.returncode != 0:
                     return self.JOB_FAILED, '{} has failed'.format(job_name)
                 else:
                     self.running_jobs.pop(job_name)
@@ -52,13 +52,14 @@ class LocalPipelineExecutor(BasePipelineExecutor):
         """
         super(LocalPipelineExecutor, self).execute_command(command, watch,
                                                            **kwargs)
+        job_name = kwargs.pop('job_name', None)
         if watch:
             try:
-                process = subprocess.Popen(command, shell=True)
+                process = subprocess.Popen(command, shell=True, **kwargs)
             except OSError as e:
                 raise CommandError(str(e))
-            self.running_jobs[kwargs.pop('job_name')] = process
 
+            self.running_jobs[job_name] = process
             if wait:
                 process.wait()
         else:
@@ -68,13 +69,16 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             except OSError as e:
                 raise CommandError(str(e))
 
-    def read_file_contents(self, file_name, **kwargs):
+    def read_file_contents(self, file_name, directory=None, **kwargs):
         """ Read contents of local file.
 
         :param str file_name: File to read.
         :return: File contents.
         :rtype: str
         """
+        if directory is not None:
+            file_name = os.path.join(directory, file_name)
+
         with open(file_name) as f:
             contents = f.read()
 
@@ -95,8 +99,10 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
         for i, step in enumerate(job_steps.values(), start=1):
             for script, job_name in zip(step, experiment_index):
+                current_workdir = os.path.join(self.workdir, job_name)
+
                 log_file = self.base_log.format(name=job_name, i=i)
-                self.change_dir(job_name, job_name=job_name)
+
                 try:
                     command = self.base_command.format(script=script)
                 except KeyError:
@@ -108,25 +114,33 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
                 if has_log:
                     self.touch_file(log_file)
-
                 try:
                     self.execute_command(command, wait=self.run_serial,
-                                         watch=True, job_name=job_name)
+                                         watch=True, job_name=job_name,
+                                         cwd=current_workdir)
                 except CommandError as e:
                     raise PipelineRunFailed(str(e))
 
-                self.change_dir('..', job_name=job_name)
+            self.wait_until_current_jobs_are_finished()
 
     def touch_file(self, file_name, times=None):
         with open(file_name, 'a'):
             os.utime(file_name, times=times)
 
     def make_dir(self, dir, **kwargs):
-        os.makedirs(dir, **kwargs)
+        try:
+            os.makedirs(dir, **kwargs)
+        except (OSError, WindowsError, FileExistsError) as e:
+            raise CommandError(str(e))
 
     def change_dir(self, dir, **kwargs):
-        os.chdir(dir)
+        try:
+            os.chdir(dir)
+        except (OSError, WindowsError) as e:
+            raise CommandError(str(e))
 
     def set_env_variables(self, env_variables):
-        for key, value in env_variables.items():
-            os.environ[key] = value
+        if env_variables:
+            assert isinstance(env_variables, dict), 'env_variables must be dict'
+            for key, value in env_variables.items():
+                os.environ[key] = value
