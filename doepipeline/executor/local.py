@@ -15,7 +15,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
     """
     def __init__(self, *args, base_command=None, run_serial=True, **kwargs):
         if base_command is None:
-            base_command = '{script} > {logfile}'
+            base_command = '{script}'
         super(LocalPipelineExecutor, self).__init__(*args,
                                                     base_command=base_command,
                                                     **kwargs)
