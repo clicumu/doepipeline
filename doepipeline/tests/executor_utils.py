@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest import mock
 import pandas as pd
 import copy
 from collections import Sequence
@@ -31,7 +33,7 @@ class MockBaseExecutor(BasePipelineExecutor):
     def poll_jobs(self):
         return self.JOB_FINISHED, ''
 
-    def read_file_contents(self, file_name):
+    def read_file_contents(self, file_name, directory=None):
         return 'A,1\nB,2'
 
 
@@ -81,10 +83,14 @@ class ExecutorTestCase(unittest.TestCase):
             }
         }
 
+        self.work_dir = os.path.join(os.getcwd(), 'work_dir')
+        os.makedirs(self.work_dir, exist_ok=True)
+
         self.env_vars = {'MYPATH': '~/a/path'}
         before = {'environment_variables': self.env_vars}
         self.outfile = 'my_results.txt'
         self.config = {
+            'working_directory': self.work_dir,
             'design': design_spec,
             'results_file': self.outfile,
             'before_run': before,
@@ -99,7 +105,8 @@ class ExecutorTestCase(unittest.TestCase):
         self.generator = PipelineGenerator(copy.deepcopy(self.config))
         self.pipeline = self.generator.new_pipeline_collection(self.design,'Exp Id')
 
-    def test_execute_commands_returns_tuple(self):
+    @mock.patch('os.makedirs')
+    def test_execute_commands_returns_tuple(self, *args):
         executor = self.executor_class(*self.init_args, **self.init_kwargs)
         result = executor.execute_command('test')
         self.assertIsInstance(result, Sequence)
