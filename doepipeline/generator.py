@@ -40,6 +40,8 @@ class PipelineGenerator:
         specials = {'results_file': self._config['results_file'],
                     'WORKDIR': self._config['working_directory'],
                     'BASEDIR': self._config['base_directory']}
+        specials.update(self._config.get('constants', dict()))
+
         self._scripts_templates = [
             parse_job_to_template_string(job, specials, path_sep) for job in jobs
         ]
@@ -136,14 +138,6 @@ class PipelineGenerator:
         pipeline_collection['WORKDIR'] = self._config['working_directory']
         pipeline_collection['JOBNAMES'] = self._config['pipeline']
 
-        if 'SLURM' in self._config:
-            slurm = self._config['SLURM']
-            slurm['jobs'] = list()
-            for job in (self._config[name] for name in self._config['pipeline']):
-                slurm['jobs'].append(job.get('SLURM', None))
-
-            pipeline_collection['SLURM'] = slurm
-
         if self._setting_up:
             self._setting_up = False
         return pipeline_collection
@@ -156,14 +150,16 @@ class PipelineGenerator:
         :param config_dict: Pipeline configuration.
         :raises: AssertionError
         """
-        reserved_terms = ('before_run', 'pipeline', 'design',
-                          'results_file', 'working_directory', 'SLURM')
+        reserved_terms = ('before_run', 'pipeline', 'design', 'constants',
+                          'results_file', 'working_directory')
         valid_before = 'environment_variables', 'scripts'
 
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'
         assert 'results_file', 'collect_results missing'
         assert 'working_directory' in config_dict, 'working directory missing'
+
+        _validate_constants(config_dict)
 
         job_names = config_dict['pipeline']
         _validate_job_list_config(config_dict, job_names, reserved_terms)
@@ -185,6 +181,13 @@ class PipelineGenerator:
                                 job_names)
 
         _validate_response_config(design_responses)
+
+
+def _validate_constants(config_dict):
+    constants = config_dict.get('constants', dict())
+    assert isinstance(constants, dict), 'constants must be key-value mapping'
+    assert all(key.isupper() for key in constants.keys()), \
+        'constant-keys must be upper-case'
 
 
 def _validate_job_list_config(config_dict, job_names, reserved_terms):
