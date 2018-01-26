@@ -1,6 +1,6 @@
 import abc
 import os
-import pyDOE
+import pyDOE2
 import numpy as np
 import pandas as pd
 import sys
@@ -159,13 +159,13 @@ class BaseExperimentDesigner:
 class ExperimentDesigner(BaseExperimentDesigner):
 
     _matrix_designers = {
-        'fullfactorial2levels': pyDOE.ff2n,
-        'fullfactorial3levels': lambda n: pyDOE.fullfact([3] * n),
-        'placketburman': pyDOE.pbdesign,
-        'boxbehnken': lambda n: pyDOE.bbdesign(n, 1),
-        'ccc': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccc'),
-        'ccf': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccf'),
-        'cci': lambda n: pyDOE.ccdesign(n, (0, 1), face='cci'),
+        'fullfactorial2levels': pyDOE2.ff2n,
+        'fullfactorial3levels': lambda n: pyDOE2.fullfact([3] * n),
+        'placketburman': pyDOE2.pbdesign,
+        'boxbehnken': lambda n: pyDOE2.bbdesign(n, 1),
+        'ccc': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccc'),
+        'ccf': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccf'),
+        'cci': lambda n: pyDOE2.ccdesign(n, (0, 1), face='cci'),
     }
 
     def __init__(self, *args, **kwargs):
