@@ -7,7 +7,12 @@ log = logging.getLogger(__name__)
 
 class SlurmPipelineExecutor(LocalPipelineExecutor):
 
-    def run_jobs(self, job_steps, experiment_index, env_variables, slurm):
+    def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
+        try:
+            slurm = kwargs['slurm']
+        except KeyError:
+            TypeError("Missing key-word argument: 'slurm'")
+
         slurm_command = 'sbatch -A {A} {flags} -J {{name}} {{script}}'
 
         for (step_name, step), slurm_spec in zip(job_steps.items(), slurm['jobs']):
