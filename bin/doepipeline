@@ -81,7 +81,7 @@ if __name__ == '__main__':
 
         iter_workdir = os.path.join(args.workdir, 'iter_'.format(n_iter))
         executor = LocalPipelineExecutor(
-            execution_type=args.execution, workdir=iter_workdir,
+            workdir=iter_workdir,
             base_command='{script}')
 
         design = designer.new_design()
