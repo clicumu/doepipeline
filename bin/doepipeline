@@ -4,11 +4,10 @@ Optimize a data-processing pipeline specified in config-file using
 principles from statistical Design of Experiments (DoE).
 """
 import argparse
-import getpass
 import os
 import sys
-import platform
-from doepipeline.executor import LocalPipelineExecutor
+
+from doepipeline.executor import LocalPipelineExecutor, SlurmPipelineExecutor
 from doepipeline.generator import PipelineGenerator
 
 
@@ -75,12 +74,17 @@ if __name__ == '__main__':
 
     designer = generator.new_designer_from_config()
 
+    if args.execution == 'slurm':
+        executor_class = SlurmPipelineExecutor
+    else:
+        executor_class = LocalPipelineExecutor
+
     n_iter = 0
     while n_iter < args.maxiter:
         n_iter += 1
 
         iter_workdir = os.path.join(args.workdir, 'iter_'.format(n_iter))
-        executor = LocalPipelineExecutor(
+        executor = executor_class(
             workdir=iter_workdir,
             base_command='{script}')
 
