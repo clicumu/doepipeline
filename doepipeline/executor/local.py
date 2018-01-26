@@ -130,13 +130,13 @@ class LocalPipelineExecutor(BasePipelineExecutor):
     def make_dir(self, dir, **kwargs):
         try:
             os.makedirs(dir, **kwargs)
-        except (OSError, WindowsError, FileExistsError) as e:
+        except (OSError, FileExistsError) as e:
             raise CommandError(str(e))
 
     def change_dir(self, dir, **kwargs):
         try:
             os.chdir(dir)
-        except (OSError, WindowsError) as e:
+        except (OSError, FileNotFoundError) as e:
             raise CommandError(str(e))
 
     def set_env_variables(self, env_variables):
