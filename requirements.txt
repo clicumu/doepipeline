@@ -3,7 +3,7 @@ numpy==1.10.4
 pandas==0.18.0
 paramiko==1.15.3
 pycrypto==2.6.1
-pydoe==0.3.8
+pyDOE2==1.0.2
 python-dateutil==2.5.1
 pytz==2016.2
 PyYAML==3.11

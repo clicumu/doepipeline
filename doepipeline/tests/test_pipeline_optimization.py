@@ -8,16 +8,17 @@ try:
 except ImportError:
     import mock
 from doepipeline.generator import PipelineGenerator
-from doepipeline.executor import SSHExecutor, LocalSerialExecutor
+from doepipeline.executor import LocalPipelineExecutor
 
 
 class TestLocalSerialRun(unittest.TestCase):
 
     def setUp(self):
         os.chdir(os.path.dirname(__file__))
-        self.work_dir = 'work_dir'
+        self.work_dir = os.path.join(os.getcwd(), 'work_dir')
         with open('simple_test.yaml') as f:
             self.config = yaml.load(f)
+            self.config['working_directory'] = self.work_dir
 
         try:
             os.mkdir(self.work_dir)
@@ -30,7 +31,8 @@ class TestLocalSerialRun(unittest.TestCase):
 
     def config_with_optimum(self, x, y):
         config = self.config.copy()
-        script = 'python {% BASEDIR make_output.py %}'
+        config['constants'] = {'ROOT': os.getcwd()}
+        script = 'python {% ROOT make_output.py %}'
         script += ' -x %d -y %d' %(x, y)
         script += ' step_one.txt step_two.txt -o {% results_file %}'
         config['MyThirdJob']['script'] = script
@@ -44,7 +46,7 @@ class TestLocalSerialRun(unittest.TestCase):
         pipeline = generator.new_pipeline_collection(design)
 
         cmd = '{script}'
-        executor = LocalSerialExecutor(workdir=self.work_dir, base_command=cmd)
+        executor = LocalPipelineExecutor(workdir=self.work_dir, base_command=cmd)
         results = executor.run_pipeline_collection(pipeline)
         optimum = designer.update_factors_from_response(results)
 
@@ -62,7 +64,7 @@ class TestLocalSerialRun(unittest.TestCase):
         pipeline = generator.new_pipeline_collection(design)
 
         cmd = '{script}'
-        executor = LocalSerialExecutor(workdir=self.work_dir, base_command=cmd)
+        executor = LocalPipelineExecutor(workdir=self.work_dir, base_command=cmd)
         results = executor.run_pipeline_collection(pipeline)
         optimum = designer.update_factors_from_response(results)
 

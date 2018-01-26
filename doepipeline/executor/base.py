@@ -91,7 +91,6 @@ class BasePipelineExecutor(object):
         self.running_jobs = dict()
         self.has_workdir = False
         self.has_experiment_dirs = False
-        self._system = platform.system()
 
     @abc.abstractmethod
     def execute_command(self, command, watch=False, wait=False, **kwargs):
@@ -147,7 +146,6 @@ class BasePipelineExecutor(object):
         :rtype: pandas.DataFrame
         """
         # Initialization..
-        pipeline_length = len(next(iter(pipeline_collection.values())))
         experiment_index = list()
         job_steps = OrderedDict((name, list()) for\
                                 name in pipeline_collection['JOBNAMES'])
@@ -155,7 +153,7 @@ class BasePipelineExecutor(object):
         setup = pipeline_collection['SETUP_SCRIPTS']
         reserved = ['ENV_VARIABLES', 'SETUP_SCRIPTS', 'RESULTS_FILE',
                     'WORKDIR', 'SLURM', 'JOBNAMES']
-        self.workdir = pipeline_collection.get('WORKDIR', '.')
+        self.workdir = pipeline_collection['WORKDIR']
         kwargs = {
             key.lower(): pipeline_collection[key] for key in reserved \
             if key in pipeline_collection \
@@ -169,11 +167,11 @@ class BasePipelineExecutor(object):
 
         # Move to working-directory
         try:
-            self._cd(self.workdir)
+            self.change_dir(self.workdir)
         except CommandError:
             log.info('{} not found, creating directory'.format(self.workdir))
-            self._mkdir(self.workdir)
-            self._cd(self.workdir)
+            self.make_dir(self.workdir)
+            self.change_dir(self.workdir)
 
         self.has_workdir = True
 
@@ -190,7 +188,7 @@ class BasePipelineExecutor(object):
 
             experiment_index.append(job_name)
             log.debug('Creating directory: {}'.format(job_name))
-            self._mkdir(job_name)
+            self.make_dir(job_name)
 
             for job_name, script in zip(job_steps, scripts):
                 job_steps[job_name].append(script)
@@ -199,17 +197,7 @@ class BasePipelineExecutor(object):
         self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)
 
         # Step into each work folder and collect pipeline results.
-        results = dict()
-        for job_name in experiment_index:
-            self._cd(job_name)
-            file_name = pipeline_collection['RESULTS_FILE']
-            contents = self.read_file_contents(file_name, job_name=job_name)
-            f_handle = StringIO(contents)
-            current_results = pd.Series.from_csv(f_handle)
-            results[job_name] = current_results
-            self._cd('..')
-
-        return pd.DataFrame(results).T
+        return self._parse_results_file(experiment_index, pipeline_collection)
 
     @abc.abstractmethod
     def run_jobs(self, job_steps, experiment_index, env_variables, **kwargs):
@@ -222,14 +210,24 @@ class BasePipelineExecutor(object):
         """
 
     @abc.abstractmethod
-    def read_file_contents(self, file_name, **kwargs):
+    def read_file_contents(self, file_name, directory=None, **kwargs):
         """ Abstract method.
 
         Override to specify how to read file contents.
 
         :param str file_name: Path of file.
+        :param str directory: Directory containing `file_name`
         :return: File-contents
         :rtype: str
+        """
+
+    @abc.abstractmethod
+    def set_env_variables(self, env_variables):
+        """ Abstract method.
+
+        Override to specify how to set environment variables.
+
+        :param dict env_variables: key-value pairs of env-variables to set.
         """
 
     def wait_until_current_jobs_are_finished(self):
@@ -245,22 +243,25 @@ class BasePipelineExecutor(object):
                 self.running_jobs = dict()
                 raise PipelineRunFailed(msg)
 
-    def _cd(self, dir, **kwargs):
+    def change_dir(self, dir, **kwargs):
         self.execute_command('cd {}'.format(dir), **kwargs)
 
-    def _touch(self, file_name, **kwargs):
-        if self._system == 'Windows':
+    def touch_file(self, file_name, **kwargs):
+        if platform.system() == 'Windows':
             command = 'type NUL >> {file}'
         else:
             command = 'touch {file}'
         self.execute_command(command.format(file=file_name), **kwargs)
 
-    def _mkdir(self, dir, **kwargs):
+    def make_dir(self, dir, **kwargs):
         self.execute_command('mkdir {}'.format(dir), **kwargs)
 
-    def _set_env_variables(self, env_variables):
-        if env_variables is None:
-            return
-        else:
-            for name, value in env_variables.items():
-                self.execute_command('{}={}'.format(name, value))
+    def _parse_results_file(self, experiment_index, pipeline_collection):
+        results = dict()
+        for job_name in experiment_index:
+            file_name = pipeline_collection['RESULTS_FILE']
+            contents = self.read_file_contents(file_name, directory=job_name)
+            f_handle = StringIO(contents)
+            current_results = pd.Series.from_csv(f_handle)
+            results[job_name] = current_results
+        return pd.DataFrame(results).T

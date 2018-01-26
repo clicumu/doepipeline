@@ -1,8 +1,9 @@
 import abc
 import os
-import pyDOE
+import pyDOE2
 import numpy as np
 import pandas as pd
+import sys
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
@@ -16,27 +17,13 @@ else:
     has_modde = True
 
 
-OptimizationResult = namedtuple('OptimizationResult', ['predicted_optimum',
-                                                       'converged',
-                                                       'tol'])
+class OptimizationResult(namedtuple(
+    'OptimizationResult', ['predicted_optimum', 'converged', 'tol'])):
+    """ `namedtuple` encapsulating results from optimization. """
 
 
-class Factor:
-
-    def __init__(self, factor_max, factor_min, factor_type):
-        self.max = factor_max
-        self.min = factor_min
-        self.type = factor_type
-        self.current_high = None
-        self.current_low = None
-
-    @property
-    def span(self):
-        return self.current_high - self.current_low
-
-    @property
-    def center(self):
-        return (self.current_high + self.current_low) / 2
+class UnsupportedFactorType(Exception):
+    pass
 
 
 class UnsupportedDesign(Exception):
@@ -47,14 +34,100 @@ class OptimizationFailed(Exception):
     pass
 
 
+class NumericFactor:
+
+    """ Base class for numeric factors.
+
+    Simple class which encapsulates current settings and allowed
+    max and min.
+
+    Can't be instantiated.
+    """
+    type = None
+
+    def __init__(self, factor_max, factor_min):
+        if type(self) == NumericFactor:
+            raise TypeError('NumericFactor can not be instantiated. Use '
+                            'sub-classes instead.')
+        self.current_low = None
+        self.current_high = None
+        self.max = factor_max
+        self.min = factor_min
+
+    @property
+    def span(self):
+        """ Distance between current high and low. """
+        return self.current_high - self.current_low
+
+    @property
+    def center(self):
+        """ Mean value of current high and low. """
+        return (self.current_high + self.current_low) / 2.0
+
+
+class QuantitativeFactor(NumericFactor):
+
+    """ Real value factors. """
+
+    type = 'quantitative'
+
+
+class OrdinalFactor(NumericFactor):
+
+    """ Ordinal (integer) factors.
+
+    Attributes are checked to be integers (or None/inf if allowed).
+    """
+
+    type = 'ordinal'
+
+    def __setattr__(self, attribute, value):
+        """ Check values `current_low`, `current_high`, `max` and `min`.
+
+        :param str attribute: Attribute name
+        :param Any value: New value
+        """
+        numeric_attributes = ('current_low', 'current_high',
+                              'max', 'min')
+        if attribute in numeric_attributes:
+            err_msg = '{} requires an integer, not {}'.format(attribute, value)
+            if attribute == 'max' and value == float('inf'):
+                pass
+            elif attribute == 'min' and value == float('-inf'):
+                pass
+            elif isinstance(value, float) and not value.is_integer():
+                raise ValueError(err_msg)
+            elif isinstance(value, (float, int)):
+                value = int(value)
+            elif attribute in ('current_low', 'current_high') and value is None:
+                pass
+            else:
+                raise ValueError(err_msg)
+
+        super(OrdinalFactor, self).__setattr__(attribute, value)
+
+
+class CategoricalFactor:
+
+    """ Multilevel categorical factors. """
+
+    type = 'categorical'
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError
+
+
 class BaseExperimentDesigner:
 
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, factors, design_type, responses, at_edges='distort'):
+    def __init__(self, factors, design_type, responses,
+                 at_edges='distort', relative_step=.25):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
+            assert relative_step is None or 0 < relative_step < 1,\
+                'relative_step must be float between 0 and 1 not {}'.format(relative_step)
         except AssertionError as e:
             raise ValueError(str(e))
 
@@ -64,11 +137,12 @@ class BaseExperimentDesigner:
             f_min = f_spec.get('min', float('-inf') if has_neg else 0)
             f_max = f_spec.get('max', float('inf'))
             f_type = f_spec.get('type', 'quantitative')
-            factor = Factor(f_max, f_min, f_type)
+            factor = Factor(f_type, f_max, f_min)
             factor.current_high = f_spec['high_init']
             factor.current_low = f_spec['low_init']
             self.factors[factor_name] = factor
 
+        self.step_length = relative_step
         self.design_type = design_type
         self.responses = responses
         self._edge_action = at_edges
@@ -85,13 +159,13 @@ class BaseExperimentDesigner:
 class ExperimentDesigner(BaseExperimentDesigner):
 
     _matrix_designers = {
-        'fullfactorial2levels': pyDOE.ff2n,
-        'fullfactorial3levels': lambda n: pyDOE.fullfact([3] * n),
-        'placketburman': pyDOE.pbdesign,
-        'boxbehnken': lambda n: pyDOE.bbdesign(n, 1),
-        'ccc': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccc'),
-        'ccf': lambda n: pyDOE.ccdesign(n, (0, 1), face='ccf'),
-        'cci': lambda n: pyDOE.ccdesign(n, (0, 1), face='cci'),
+        'fullfactorial2levels': pyDOE2.ff2n,
+        'fullfactorial3levels': lambda n: pyDOE2.fullfact([3] * n),
+        'placketburman': pyDOE2.pbdesign,
+        'boxbehnken': lambda n: pyDOE2.bbdesign(n, 1),
+        'ccc': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccc'),
+        'ccf': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccf'),
+        'cci': lambda n: pyDOE2.ccdesign(n, (0, 1), face='cci'),
     }
 
     def __init__(self, *args, **kwargs):
@@ -119,11 +193,16 @@ class ExperimentDesigner(BaseExperimentDesigner):
         mins = np.array([f.min for f in self.factors.values()])
         maxes = np.array([f.max for f in self.factors.values()])
         span = np.array([f.span for f in self.factors.values()])
-
         centers = np.array([f.center for f in self.factors.values()])
-        factor_matrix = self._design_matrix * (span / 2) + centers
+        factor_matrix = self._design_matrix * (span / 2.0) + centers
 
         # Check if current settings are outside allowed design space.
+        # Also, for factors that are specified as ordinal, adjust their values
+        # in the design matrix to be rounded floats
+        for i, factor in enumerate(self.factors.values()):
+            if factor.type == 'ordinal':
+                factor_matrix[:,i] = np.round(factor_matrix[:,i])
+
         if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
             if self._edge_action == 'distort':
 
@@ -153,7 +232,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         :param pandas.DataFrame response: Response sheet.
         :param int degree: Degree of polynomial to fit.
-        :param float tol: Accepted elative distance to design space edge.
+        :param float tol: Accepted relative distance to design space edge.
         :returns: Calculated optimum.
         :rtype: OptimizationResult
         """
@@ -164,21 +243,41 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         # Find predicted optimal factor setting.
         optimal_x = predict_optimum(self._design_sheet, response,
-                                    criterion, degree)
+                                    criterion, self.factors, degree)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        factor_info = [(f.span, f.current_high, f.current_low)
+        factor_info = [(f.span, f.current_high, f.current_low, f.center, f.type)
                        for f in self.factors.values()]
-        spans, old_highs, old_lows = map(np.array, zip(*factor_info))
+        spans, old_highs, old_lows, centers, types = map(np.array, zip(*factor_info))
         ratios = (old_highs - optimal_x) / spans
 
         if np.logical_and(ratios > tol, ratios < 1 - tol).all():
             converged = True
         else:
             converged = False
-            new_highs = optimal_x + spans / 2
-            new_lows = optimal_x - spans / 2
+
+            # Calculate the new design center.
+            if self.step_length is not None:
+                allowed = spans * self.step_length
+                diff = optimal_x - centers
+                shift = allowed * (diff / np.linalg.norm(diff))
+                new_center = centers + shift
+            else:
+                new_center = optimal_x
+
+            # Calculate the new highs and lows. Adjust the odrinal factors' values here.
+            # FIXME: Should really new_center and spans be rounded before added?
+            new_highs = [
+                int(round(new_center[i]) + round(spans[i] / 2.0))
+                if factor_type == 'ordinal' else new_center[i] + spans / 2.0
+                for i, factor_type in enumerate(types)
+            ]
+            new_lows = [
+                int(round(new_center[i]) - round(spans[i] / 2.0))
+                if factor_type == 'ordinal' else new_center[i] - spans / 2.0
+                for i, factor_type in enumerate(types)
+            ]
             for i, key in enumerate(self._design_sheet.columns):
                 self.factors[key].current_high = new_highs[i]
                 self.factors[key].current_low = new_lows[i]
@@ -311,11 +410,33 @@ class _ModdeQDesigner(BaseExperimentDesigner):
         pass
 
 
+if has_modde:
+    ModdeQDesigner = _ModdeQDesigner
+
+
+def Factor(factor_type, *args, **kwargs):
+    """ Factory function stratified by the factor_type parameter
+
+    :param str factor_type: The factor type (ordinal, quantitative, categorical).
+    :returns: Function corresponding to `factor_type`.
+    :rtype: QuantitativeFactor, OrdinalFactor, CategoricalFactor.
+    :raises: UnsupportedFactorType
+    """
+    if factor_type.lower() == "quantitative":
+        return QuantitativeFactor(*args, **kwargs)
+    elif factor_type.lower() == "ordinal":
+        return OrdinalFactor(*args, **kwargs)
+    elif factor_type.lower() == "categorical":
+        return CategoricalFactor(*args, **kwargs)
+    else:
+        raise UnsupportedFactorType(str(factor_type))
+
+
 def make_desirability_function(response):
     """ Define a Derringer and Suich desirability function.
 
-    :param response_dict:
-    :return:
+    :param dict response_dict: Response variable config dictionary.
+    :return: desirability function.
     :rtype: Callable
     """
     s = response.get('priority', 1)
@@ -327,7 +448,7 @@ def make_desirability_function(response):
         def desirability(y):
             if y < L or U < y:
                 return 0
-            elif  L <= y <= T:
+            elif L <= y <= T:
                 return ((y - L) / (T - L)) ** s
             elif T <= y <= U:
                 return ((y - U) / (T - U)) ** s
@@ -356,66 +477,71 @@ def make_desirability_function(response):
             else:
                 return ((y - U) / (T - U)) ** s
 
+    else:
+        raise ValueError(response['criterion'])
+
     return desirability
 
 
-def predict_optimum(design_sheet, response, criterion, degree=2):
-        """ Regress using `degree`-polynomial and optimize response.
+def predict_optimum(design_sheet, response, criterion, factors, degree=2):
+    """ Regress using `degree`-polynomial and optimize response.
 
-        :param pandas.DataFrame design_sheet: Factor settings.
-        :param pandas.Series response: Response Y-vector.
-        :param str criterion: 'maximize' | 'minimize'
-        :param int degree: Degree of polynomial to use for regression.
-        :return: Array with predicted optimum.
-        :rtype: numpy.ndarray[float]
-        :raises: OptimizationFailed
-        """
-        matrix_columns = design_sheet.columns
-        n_rows, n_cols = design_sheet.shape
-        products = OrderedDict()
-        combinations = [list(comb) for deg in range(1, degree + 1)
-                        for comb in combinations_with_replacement(range(n_cols), deg)]
+    :param pandas.DataFrame design_sheet: Factor settings.
+    :param pandas.Series response: Response Y-vector.
+    :param str criterion: 'maximize' | 'minimize'
+    :param int degree: Degree of polynomial to use for regression.
+    :return: Array with predicted optimum.
+    :rtype: numpy.ndarray[float]
+    :raises: OptimizationFailed
+    """
+    matrix_columns = design_sheet.columns
+    n_rows, n_cols = design_sheet.shape
+    products = OrderedDict()
+    combinations = [list(comb) for deg in range(1, degree + 1)
+                    for comb in combinations_with_replacement(range(n_cols), deg)]
 
-        # Multiply columns together.
-        for column_group in (matrix_columns[comb] for comb in combinations):
-            values = design_sheet[column_group].product(axis=1)
-            products['*'.join(column_group)] = values
+    # Multiply columns together.
+    for column_group in (matrix_columns[comb] for comb in combinations):
+        values = design_sheet[column_group].product(axis=1)
+        products['*'.join(column_group)] = values
 
-        extended_sheet = pd.DataFrame(products)
+    extended_sheet = pd.DataFrame(products)
 
-        # Extend data-sheet with constants-column.
-        design_w_constants = np.hstack([np.ones((n_rows, 1)),
-                                        extended_sheet.values])
+    # Extend data-sheet with constants-column.
+    design_w_constants = np.hstack([np.ones((n_rows, 1)),
+                                    extended_sheet.values])
 
-        # Regress using least squares.
-        c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
-        coefficients = c_stacked.flatten()
+    # Regress using least squares.
+    c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
+    coefficients = c_stacked.flatten()
+    # Define optimization function for optimizer.
+    def predicted_response(x, invert=False):
+        # Make extended factor list from given X.
+        factor_list = [1] + [np.product(x[comb]) for comb in combinations]
+        factors = np.array(factor_list)
 
-        # Define optimization function for optimizer.
-        def predicted_response(x, invert=False):
-            # Make extended factor list from given X.
-            factor_list = [1] + [np.product(x[comb]) for comb in combinations]
-            factors = np.array(factor_list)
+        # Calculate response.
+        factor_contributions = np.multiply(factors, coefficients)
+        return (-1 if invert else 1) * factor_contributions.sum()
 
-            # Calculate response.
-            factor_contributions = np.multiply(factors, coefficients)
-            return (-1 if invert else 1) * factor_contributions.sum()
+    # Since factors are set according to design the optimum is already
+    # guessed to be at the center of the design. Hence, use medians as
+    # initial guess.
+    x0 = design_sheet.median(axis=0).values
 
-        # Since factors are set according to design the optimum is already
-        # guessed to be at the center of the design. Hence, use medians as
-        # initial guess.
-        x0 = design_sheet.median(axis=0).values
+    # Set up bounds for optimization to keep it inside the allowed design space.
+    mins = [f.min if f.min != '-inf' else None for f in factors.values()]
+    maxes = [f.max if f.max != 'inf' else None for f in factors.values()]
+    bounds = list(zip(mins, maxes))
 
-        if criterion == 'maximize':
-            optimization_results = minimize(lambda x: predicted_response(x, True), x0)
-        elif criterion == 'minimize':
-            optimization_results = minimize(predicted_response, x0)
+    if criterion == 'maximize':
+        optimization_results = minimize(lambda x: predicted_response(x, True),
+                                        x0, method='L-BFGS-B', bounds=bounds)
+    elif criterion == 'minimize':
+        optimization_results = minimize(predicted_response, x0,
+                                        method='L-BFGS-B', bounds=bounds)
 
-        if not optimization_results['success']:
-            raise OptimizationFailed(optimization_results['message'])
+    if not optimization_results['success']:
+        raise OptimizationFailed(optimization_results['message'])
 
-        return optimization_results['x']
-
-
-if has_modde:
-    ModdeQDesigner = _ModdeQDesigner
+    return optimization_results['x']
