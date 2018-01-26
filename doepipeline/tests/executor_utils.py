@@ -4,7 +4,7 @@ import copy
 from collections import Sequence
 
 from doepipeline.executor.base import BasePipelineExecutor
-from doepipeline.executor.mixins import ScreenExecutorMixin, BatchExecutorMixin
+from doepipeline.executor.slurm import ScreenExecutorMixin, BatchExecutorMixin
 from doepipeline.generator import PipelineGenerator
 
 

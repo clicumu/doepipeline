@@ -6,7 +6,7 @@ import subprocess
 import os
 
 from .base import BasePipelineExecutor, CommandError
-from .mixins import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
+from .slurm import BatchExecutorMixin, ScreenExecutorMixin, SerialExecutorMixin
 
 
 class BaseLocalExecutor(BasePipelineExecutor):

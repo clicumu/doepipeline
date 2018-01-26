@@ -9,7 +9,7 @@ import re
 from contextlib import contextmanager
 import posixpath
 from doepipeline.executor.base import BasePipelineExecutor, CommandError
-from doepipeline.executor import mixins
+from doepipeline.executor import slurm
 
 
 log = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class BaseSSHExecutor(BasePipelineExecutor):
         return contents
 
 
-class SSHSerialExecutor(mixins.SerialExecutorMixin, BaseSSHExecutor):
+class SSHSerialExecutor(slurm.SerialExecutorMixin, BaseSSHExecutor):
 
     def __init__(self, *args, **kwargs):
         super(SSHSerialExecutor, self).__init__(*args, **kwargs)
@@ -207,10 +207,10 @@ class SSHSerialExecutor(mixins.SerialExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            return mixins.SerialExecutorMixin.poll_jobs(self)
+            return slurm.SerialExecutorMixin.poll_jobs(self)
 
 
-class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
+class SSHScreenExecutor(slurm.ScreenExecutorMixin, BaseSSHExecutor):
     """
     Executor class which executes jobs in parallel using screens
     at remote host communicating via SSH.
@@ -222,10 +222,10 @@ class SSHScreenExecutor(mixins.ScreenExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            return mixins.ScreenExecutorMixin.poll_jobs(self)
+            return slurm.ScreenExecutorMixin.poll_jobs(self)
 
 
-class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
+class SSHBatchExecutor(slurm.BatchExecutorMixin, BaseSSHExecutor):
     """
     Executor class which executes jobs in parallel using batch
     scripts at remote host communicating via SSH.
@@ -237,14 +237,14 @@ class SSHBatchExecutor(mixins.BatchExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            mixins.BatchExecutorMixin.poll_jobs(self)
+            slurm.BatchExecutorMixin.poll_jobs(self)
 
 
-class SSHSlurmExecutor(mixins.SlurmExecutorMixin, BaseSSHExecutor):
+class SSHSlurmExecutor(slurm.SlurmExecutorMixin, BaseSSHExecutor):
 
     def poll_jobs(self):
         with self.connection():
-            return mixins.SlurmExecutorMixin.poll_jobs(self)
+            return slurm.SlurmExecutorMixin.poll_jobs(self)
 
 
 def SSHExecutor(*args, execution_type='serial', **kwargs):

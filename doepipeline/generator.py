@@ -216,20 +216,24 @@ class PipelineGenerator:
                        for fac, fac_d in job['factors'].items()\
                        if fac_d.get('substitute', False)), msg
 
-        # Check SLURM-specifics.
-        assert (any('SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict),\
-            'job specified with SLURM but SLURM project-name is missing'
+        self._validate_slurm_config(config_dict, jobs)
 
-        if 'SLURM' in config_dict:
-            assert 'account_name' in config_dict['SLURM'],\
-                'SLURM account name required'
 
-            for job in (j for j in jobs if 'SLURM' in j):
-                assert 'SLURM' in job,\
-                    'All jobs must have SLURM-settings specified'
-                assert 'p' in job['SLURM'] and job['SLURM']['p'],\
-                    'job type must be set (-p)'
-                assert 'n' in job['SLURM'] and job['SLURM']['n'],\
-                    'job cores/nodes must be set (-n)'
-                assert 't' in job['SLURM'] and job['SLURM']['t'],\
-                    'job time must be set (-t)'
+def _validate_slurm_config(config_dict, jobs):
+    # Check SLURM-specifics.
+    assert (any(
+        'SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict), \
+        'job specified with SLURM but SLURM project-name is missing'
+    if 'SLURM' in config_dict:
+        assert 'account_name' in config_dict['SLURM'], \
+            'SLURM account name required'
+
+        for job in (j for j in jobs if 'SLURM' in j):
+            assert 'SLURM' in job, \
+                'All jobs must have SLURM-settings specified'
+            assert 'p' in job['SLURM'] and job['SLURM']['p'], \
+                'job type must be set (-p)'
+            assert 'n' in job['SLURM'] and job['SLURM']['n'], \
+                'job cores/nodes must be set (-n)'
+            assert 't' in job['SLURM'] and job['SLURM']['t'], \
+                'job time must be set (-t)'
