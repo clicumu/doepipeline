@@ -6,6 +6,7 @@ principles from statistical Design of Experiments (DoE).
 import argparse
 import os
 import sys
+import logging
 
 from doepipeline.executor import LocalPipelineExecutor, SlurmPipelineExecutor
 from doepipeline.generator import PipelineGenerator
@@ -59,6 +60,10 @@ def make_parser():
                                         'optimization (default: 2)')
     parser.add_argument('-o', '--output', default='optimal_parameters.csv',
                         help='output file (default: optimal_parameters.csv)')
+    parser.add_argument('-l', '--log', default=sys.stdout,
+                        help='log file (default: STDOUT)')
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='if set, logging will be set to debug')
 
     return parser
 
@@ -67,11 +72,24 @@ if __name__ == '__main__':
     parser = make_parser()
     args = parser.parse_args()
 
+    if args.debug:
+        log_format = ('[%(filename)s:%(lineno)s - %(funcName)20s() ] '
+                      '%(asctime)s %(message)s')
+    else:
+        log_format = '%(asctime)s %(levelname)-8s: %(message)s'
+    logging.basicConfig(
+        format=log_format,
+        level=logging.INFO if not args.debug else logging.DEBUG
+    )
+
     try:
+        logging.info('Reads config: {}'.format(args.config))
         generator = PipelineGenerator.from_yaml(args.config)
     except ValueError as e:
+        logging.critical('Failed to read config.')
         sys.exit(str(e))
 
+    logging.info('Initialize designer.')
     designer = generator.new_designer_from_config()
 
     if args.execution == 'slurm':
@@ -83,26 +101,43 @@ if __name__ == '__main__':
     while n_iter < args.maxiter:
         n_iter += 1
 
+        logging.info('Starts optimization iteration {}.'.format(n_iter))
+
         iter_workdir = os.path.join(args.workdir, 'iter_'.format(n_iter))
+        logging.info('Current working-directory: {}'.format(iter_workdir))
+
         executor = executor_class(
             workdir=iter_workdir,
             base_command='{script}')
 
+        logging.info('Sets up new design.')
         design = designer.new_design()
+
+        logging.info('Prepares pipeline with design parameters.')
         pipeline = generator.new_pipeline_collection(design)
+
+        logging.info('Start execution of pipeline.')
         results = executor.run_pipeline_collection(pipeline)
+
+        logging.info('Execution iteration {} finished, finding optimum'.format(n_iter))
         optimum = designer.update_factors_from_response(results, tol=args.tol)
 
         if optimum.converged:
+            logging.info(('Optimum reached after {} iterations. '
+                          'Saves output to {}.'.format(n_iter, args.output)))
             optimum.predicted_optimum.to_csv(args.output)
             break
 
     if not optimum.converged:
+        logging.info('Failed to converge to optimum in {} iterations'.format(n_iter))
         try:
             prefix, suffix = args.output.rsplit('.', 1)
         except ValueError:
             prefix = args.output
             suffix = ''
-
         outpath = '.'.join([prefix, 'unconverged', suffix])
+
+        logging.info('Saves unconverged results to {}.'.format(outpath))
         optimum.predicted_optimum.to_csv(outpath)
+
+    logging.info('Shuts down.')

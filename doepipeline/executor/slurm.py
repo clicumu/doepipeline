@@ -2,8 +2,6 @@ import logging
 
 from doepipeline.executor.local import LocalPipelineExecutor
 
-log = logging.getLogger(__name__)
-
 
 class SlurmPipelineExecutor(LocalPipelineExecutor):
 
@@ -90,6 +88,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
         current_jobs = [job for job in self.running_jobs.items()]
 
         for job_name, job_info in current_jobs:
+            logging.debug('Polls "{}"'.format(job_name))
             is_running_slurm = job_info['running_at_slurm']
             if is_running_slurm:
                 cmd = 'sacct -j {id}'.format(id=job_info['id'])
@@ -107,11 +106,11 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     exit_code = status_dict['ExitCode']
                     msg = '{0} has failed. (exit code {1})'.format(job_name,
                                                                    exit_code)
-                    log.error(msg)
+                    logging.error(msg)
                     return self.JOB_FAILED, msg
 
                 if status_dict['State'] == 'COMPLETED':
-                    log.info('{0} finished'.format(job_name))
+                    logging.info('{0} finished'.format(job_name))
                     self.running_jobs.pop(job_name)
 
                 else:
@@ -120,11 +119,11 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
             else:  # Check status of process using ps.
                 status = stdout.strip()
                 if not status or 'done' in status.lower():
-                    log.info('{0} finished'.format(job_name))
+                    logging.info('{0} finished'.format(job_name))
                     self.running_jobs.pop(job_name)
                 elif 'exit' in status.lower():
                     msg = '{0} has failed'.format(job_name)
-                    log.error(msg)
+                    logging.error(msg)
                     return self.JOB_FAILED, msg
                 else:
                     jobs_still_running.append(job_name)
