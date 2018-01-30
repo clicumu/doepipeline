@@ -3,7 +3,7 @@ import os
 import pyDOE2
 import numpy as np
 import pandas as pd
-import sys
+import logging
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
@@ -45,12 +45,12 @@ class NumericFactor:
     """
     type = None
 
-    def __init__(self, factor_max, factor_min):
+    def __init__(self, factor_max, factor_min, current_low=None, current_high=None):
         if type(self) == NumericFactor:
             raise TypeError('NumericFactor can not be instantiated. Use '
                             'sub-classes instead.')
-        self.current_low = None
-        self.current_high = None
+        self.current_low = current_low
+        self.current_high = current_high
         self.max = factor_max
         self.min = factor_min
 
@@ -63,6 +63,14 @@ class NumericFactor:
     def center(self):
         """ Mean value of current high and low. """
         return (self.current_high + self.current_low) / 2.0
+
+    def __repr__(self):
+        return ('{}(factor_max={}, factor_min={}, current_low={}, '
+                'current_high={})').format(self.__class__.__name__,
+                                           self.max,
+                                           self.min,
+                                           self.current_low,
+                                           self.current_high)
 
 
 class QuantitativeFactor(NumericFactor):
@@ -141,6 +149,7 @@ class BaseExperimentDesigner:
             factor.current_high = f_spec['high_init']
             factor.current_low = f_spec['low_init']
             self.factors[factor_name] = factor
+            logging.debug('Sets factor {}: {}'.format(factor_name, factor))
 
         self.step_length = relative_step
         self.design_type = design_type
@@ -199,11 +208,14 @@ class ExperimentDesigner(BaseExperimentDesigner):
         # Check if current settings are outside allowed design space.
         # Also, for factors that are specified as ordinal, adjust their values
         # in the design matrix to be rounded floats
-        for i, factor in enumerate(self.factors.values()):
+        for i, (factor_name, factor) in enumerate(self.factors.items()):
             if factor.type == 'ordinal':
                 factor_matrix[:,i] = np.round(factor_matrix[:,i])
+            logging.debug('Current setting {}: {}'.format(factor_name, factor))
 
         if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
+            logging.info(('Out of design space factors. Adjusts factors'
+                          'by {}.'.format(self._edge_action + 'ing')))
             if self._edge_action == 'distort':
 
                 # Simply cap out-of-boundary values at mins and maxes.
@@ -242,6 +254,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
             raise NotImplementedError
 
         # Find predicted optimal factor setting.
+        logging.info('Finds optimum of current design.')
         optimal_x = predict_optimum(self._design_sheet, response,
                                     criterion, self.factors, degree)
 
@@ -254,8 +267,10 @@ class ExperimentDesigner(BaseExperimentDesigner):
 
         if np.logical_and(ratios > tol, ratios < 1 - tol).all():
             converged = True
+            logging.info('Convergence reached.')
         else:
             converged = False
+            logging.info('Convergence not reached. Moves design.')
 
             # Calculate the new design center.
             if self.step_length is not None:
@@ -265,6 +280,9 @@ class ExperimentDesigner(BaseExperimentDesigner):
                 new_center = centers + shift
             else:
                 new_center = optimal_x
+
+            logging.debug('New design center {} (old {})'.format(new_center,
+                                                                 centers))
 
             # Calculate the new highs and lows. Adjust the odrinal factors' values here.
             # FIXME: Should really new_center and spans be rounded before added?
@@ -278,14 +296,19 @@ class ExperimentDesigner(BaseExperimentDesigner):
                 if factor_type == 'ordinal' else new_center[i] - spans / 2.0
                 for i, factor_type in enumerate(types)
             ]
+            logging.info('Updates factor settings.')
             for i, key in enumerate(self._design_sheet.columns):
                 self.factors[key].current_high = new_highs[i]
                 self.factors[key].current_low = new_lows[i]
+                logging.debug('New factor setting, {}: {}'.format(key,
+                                                                  self.factors[key]))
 
         results = OptimizationResult(
             pd.Series(optimal_x, self._design_sheet.columns),
             converged, tol
         )
+        logging.debug('Current predicted optimum: {}'.format(
+            results.predicted_optimum))
         return results
 
 
