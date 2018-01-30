@@ -20,7 +20,6 @@ import pandas as pd
 
 from doepipeline import utils
 
-log = logging.getLogger(__name__)
 
 
 class CommandError(Exception):
@@ -120,6 +119,10 @@ class BasePipelineExecutor(object):
         except AssertionError as e:
             raise ValueError(str(e))
 
+        logging.debug(('Execute command: "{}", watch={}, '
+                       'wait={}, kwargs={}').format(command, watch,
+                                                    wait, kwargs))
+
     @abc.abstractmethod
     def poll_jobs(self):
         """ Abstract method.
@@ -169,7 +172,7 @@ class BasePipelineExecutor(object):
         try:
             self.change_dir(self.workdir)
         except CommandError:
-            log.info('{} not found, creating directory'.format(self.workdir))
+            logging.info('{} not found, creating directory'.format(self.workdir))
             self.make_dir(self.workdir)
             self.change_dir(self.workdir)
 
@@ -180,14 +183,14 @@ class BasePipelineExecutor(object):
             for script in setup:
                 self.execute_command(script)
 
-        log.info('Creating job directories.')
+        logging.info('Creating job directories.')
         for job_name, scripts in pipeline_scripts.items():
             if job_name in reserved:
                 # Don't treat special names as jobs.
                 continue
 
             experiment_index.append(job_name)
-            log.debug('Creating directory: {}'.format(job_name))
+            logging.info('Creating directory: {}'.format(job_name))
             self.make_dir(job_name)
 
             for job_name, script in zip(job_steps, scripts):
@@ -241,6 +244,7 @@ class BasePipelineExecutor(object):
                 time.sleep(self.poll_interval)
             else:
                 self.running_jobs = dict()
+                logging.critical('Pipeline failed: "{}"'.format(msg))
                 raise PipelineRunFailed(msg)
 
     def change_dir(self, dir, **kwargs):
@@ -260,6 +264,7 @@ class BasePipelineExecutor(object):
         results = dict()
         for job_name in experiment_index:
             file_name = pipeline_collection['RESULTS_FILE']
+            logging.info('Reads pipeline results from {}'.format(file_name))
             contents = self.read_file_contents(file_name, directory=job_name)
             f_handle = StringIO(contents)
             current_results = pd.Series.from_csv(f_handle)
