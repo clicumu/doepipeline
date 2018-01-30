@@ -25,11 +25,12 @@ setup(
     install_requires=[
         'pyyaml',
         'pandas',
-        'paramiko'
+        'pyDOE2'
     ],
     include_package_data=True,
     tests_require=[
         'mock',
+        'nose'
     ],
     scripts=[
         os.path.join('bin', 'doepipeline')
