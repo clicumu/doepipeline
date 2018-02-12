@@ -40,7 +40,7 @@ def make_parser():
     parser.add_argument('-e', '--execution', default='serial',
                           help=('how to execute steps in pipeline '
                                 '(default serial)'),
-                          choices=('serial', 'slurm'))
+                          choices=('serial', 'slurm', 'parallel'))
     parser.add_argument('-w', '--workdir',
                         help='working directory (default: .)',
                         default='.')
