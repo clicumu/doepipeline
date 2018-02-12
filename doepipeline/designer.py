@@ -193,6 +193,42 @@ class ExperimentDesigner(BaseExperimentDesigner):
         else:
             self._desirabilites = None
 
+    def new_screening_design(self, reduction='auto'):
+        factor_items = sorted(self.factors.items())
+
+        levels = list()
+        names = list()
+        for name, factor in factor_items:
+            names.append(name)
+
+            if isinstance(factor, CategoricalFactor):
+                levels.append(factor.values)
+                continue
+
+            num_levels = getattr(factor, 'screening_levels', 5)
+            spacing = getattr(factor, 'screening_spacing', 'linear')
+            min_ = factor.min
+            max_ = factor.max
+            if min == float('-inf') or max == float('-inf'):
+                raise ValueError('Can\'t perform screening with unbounded factors')
+
+            space = np.linspace if spacing == 'linear' else np.logspace
+            values = space(min_, max_, num_levels)
+
+            if isinstance(factor, OrdinalFactor):
+                values = sorted(np.unique(np.round(values)))
+
+            levels.append(values)
+
+        design_matrix = pyDOE2.gsd([len(values) for values in levels],
+                                   reduction if reduction is not 'auto' else len(levels))
+        factor_matrix = np.zeros_like(design_matrix)
+        for i, values in enumerate(levels):
+            factor_matrix[:, i] = np.array(values)[design_matrix[:, i]]
+
+        self._design_sheet = pd.DataFrame(factor_matrix, columns=names)
+        return self._design_sheet
+
     def new_design(self):
         """
 
