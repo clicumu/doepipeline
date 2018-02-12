@@ -94,8 +94,14 @@ if __name__ == '__main__':
 
     if args.execution == 'slurm':
         executor_class = SlurmPipelineExecutor
-    else:
+    elif args.execution == 'serial':
         executor_class = LocalPipelineExecutor
+    elif args.execution == 'parallel':
+        executor_class = lambda *a, **kw: LocalPipelineExecutor(*a,
+                                                                run_serial=False,
+                                                                **kw)
+    else:
+        sys.exit('Unknown executor: {}'.format(args.execution))
 
     n_iter = 0
     while n_iter < args.maxiter:

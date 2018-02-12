@@ -13,6 +13,8 @@ from doepipeline.executor import LocalPipelineExecutor
 
 class TestLocalSerialRun(unittest.TestCase):
 
+    executor = LocalPipelineExecutor
+
     def setUp(self):
         os.chdir(os.path.dirname(__file__))
         self.work_dir = os.path.join(os.getcwd(), 'work_dir')
@@ -46,7 +48,7 @@ class TestLocalSerialRun(unittest.TestCase):
         pipeline = generator.new_pipeline_collection(design)
 
         cmd = '{script}'
-        executor = LocalPipelineExecutor(workdir=self.work_dir, base_command=cmd)
+        executor = self.__class__.executor(workdir=self.work_dir, base_command=cmd)
         results = executor.run_pipeline_collection(pipeline)
         optimum = designer.update_factors_from_response(results)
 
@@ -64,7 +66,7 @@ class TestLocalSerialRun(unittest.TestCase):
         pipeline = generator.new_pipeline_collection(design)
 
         cmd = '{script}'
-        executor = LocalPipelineExecutor(workdir=self.work_dir, base_command=cmd)
+        executor = self.__class__.executor(workdir=self.work_dir, base_command=cmd)
         results = executor.run_pipeline_collection(pipeline)
         optimum = designer.update_factors_from_response(results)
 
@@ -73,3 +75,9 @@ class TestLocalSerialRun(unittest.TestCase):
         for factor in design.columns:
             self.assertTrue(np.isclose(optimum.predicted_optimum[factor],
                                        expected_optimum[factor]))
+
+
+class TestLocalParallelRun(TestLocalSerialRun):
+
+    executor = lambda *a, **kw: LocalPipelineExecutor(*a, run_serial=False,
+                                                      poll_interval=1, **kw)
