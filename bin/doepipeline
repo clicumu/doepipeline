@@ -60,7 +60,7 @@ def make_parser():
                                         'optimization (default: 2)')
     parser.add_argument('-o', '--output', default='optimal_parameters.csv',
                         help='output file (default: optimal_parameters.csv)')
-    parser.add_argument('-l', '--log', default=sys.stdout,
+    parser.add_argument('-l', '--log', default=None,
                         help='log file (default: STDOUT)')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='if set, logging will be set to debug')
