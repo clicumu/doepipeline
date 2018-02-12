@@ -129,7 +129,7 @@ class ExperimentDesigner:
         'cci': lambda n: pyDOE2.ccdesign(n, (0, 1), face='cci'),
     }
 
-    def __init__(self, factors, design_type, responses,
+    def __init__(self, factors, design_type, responses, skip_screening=True,
                  at_edges='distort', relative_step=.25):
         try:
             assert at_edges in ('distort', 'shrink'),\
@@ -151,10 +151,12 @@ class ExperimentDesigner:
             self.factors[factor_name] = factor
             logging.debug('Sets factor {}: {}'.format(factor_name, factor))
 
+        self.skip_screening = skip_screening
         self.step_length = relative_step
         self.design_type = design_type
         self.responses = responses
         self._edge_action = at_edges
+        self._phase = 'optimization' if self.skip_screening else 'screening'
         n = len(self.factors)
         try:
             matrix_designer = self._matrix_designers[self.design_type.lower()]
@@ -169,77 +171,16 @@ class ExperimentDesigner:
         else:
             self._desirabilites = None
 
-    def new_screening_design(self, reduction='auto'):
-        factor_items = sorted(self.factors.items())
-
-        levels = list()
-        names = list()
-        for name, factor in factor_items:
-            names.append(name)
-
-            if isinstance(factor, CategoricalFactor):
-                levels.append(factor.values)
-                continue
-
-            num_levels = getattr(factor, 'screening_levels', 5)
-            spacing = getattr(factor, 'screening_spacing', 'linear')
-            min_ = factor.min
-            max_ = factor.max
-            if min == float('-inf') or max == float('-inf'):
-                raise ValueError('Can\'t perform screening with unbounded factors')
-
-            space = np.linspace if spacing == 'linear' else np.logspace
-            values = space(min_, max_, num_levels)
-
-            if isinstance(factor, OrdinalFactor):
-                values = sorted(np.unique(np.round(values)))
-
-            levels.append(values)
-
-        design_matrix = pyDOE2.gsd([len(values) for values in levels],
-                                   reduction if reduction is not 'auto' else len(levels))
-        factor_matrix = np.zeros_like(design_matrix)
-        for i, values in enumerate(levels):
-            factor_matrix[:, i] = np.array(values)[design_matrix[:, i]]
-
-        self._design_sheet = pd.DataFrame(factor_matrix, columns=names)
-        return self._design_sheet
-
     def new_design(self):
         """
 
         :return: Experimental design-sheet.
         :rtype: pandas.DataFrame
         """
-        mins = np.array([f.min for f in self.factors.values()])
-        maxes = np.array([f.max for f in self.factors.values()])
-        span = np.array([f.span for f in self.factors.values()])
-        centers = np.array([f.center for f in self.factors.values()])
-        factor_matrix = self._design_matrix * (span / 2.0) + centers
-
-        # Check if current settings are outside allowed design space.
-        # Also, for factors that are specified as ordinal, adjust their values
-        # in the design matrix to be rounded floats
-        for i, (factor_name, factor) in enumerate(self.factors.items()):
-            if factor.type == 'ordinal':
-                factor_matrix[:,i] = np.round(factor_matrix[:,i])
-            logging.debug('Current setting {}: {}'.format(factor_name, factor))
-
-        if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
-            logging.warning(('Out of design space factors. Adjusts factors'
-                             'by {}.'.format(self._edge_action + 'ing')))
-            if self._edge_action == 'distort':
-
-                # Simply cap out-of-boundary values at mins and maxes.
-                capped_mins = np.maximum(factor_matrix, mins)
-                capped_mins_and_maxes = np.minimum(capped_mins, maxes)
-                factor_matrix = capped_mins_and_maxes
-
-            elif self._edge_action == 'shrink':
-                raise NotImplementedError
-
-        self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
-        return self._design_sheet
+        if self._phase == 'screening':
+            return self._new_screening_design()
+        else:
+            return self._new_optimization_design()
 
     def update_factors_from_response(self, response, degree=2, tol=.25):
         """ Calculate optimal factor settings given response and update
@@ -264,7 +205,12 @@ class ExperimentDesigner:
             criterion = list(self.responses.values())[0]['criterion']
         else:
             raise NotImplementedError
+        if self._phase == 'screening':
+            return self._evaluate_screening(response, criterion)
+        else:
+            return self._evaluate_optimization(response, degree, tol, criterion)
 
+    def _evaluate_optimization(self, response, degree, tol, criterion):
         # Find predicted optimal factor setting.
         logging.info('Finds optimum of current design.')
         optimal_x = predict_optimum(self._design_sheet, response,
@@ -322,6 +268,76 @@ class ExperimentDesigner:
         logging.info('Predicted optimum: {}'.format(
             results.predicted_optimum))
         return results
+
+    def _evaluate_screening(self, response, criterion):
+        raise NotImplementedError
+
+    def _new_screening_design(self, reduction='auto'):
+        factor_items = sorted(self.factors.items())
+
+        levels = list()
+        names = list()
+        for name, factor in factor_items:
+            names.append(name)
+
+            if isinstance(factor, CategoricalFactor):
+                levels.append(factor.values)
+                continue
+
+            num_levels = getattr(factor, 'screening_levels', 5)
+            spacing = getattr(factor, 'screening_spacing', 'linear')
+            min_ = factor.min
+            max_ = factor.max
+            if min == float('-inf') or max == float('-inf'):
+                raise ValueError('Can\'t perform screening with unbounded factors')
+
+            space = np.linspace if spacing == 'linear' else np.logspace
+            values = space(min_, max_, num_levels)
+
+            if isinstance(factor, OrdinalFactor):
+                values = sorted(np.unique(np.round(values)))
+
+            levels.append(values)
+
+        design_matrix = pyDOE2.gsd([len(values) for values in levels],
+                                   reduction if reduction is not 'auto' else len(levels))
+        factor_matrix = np.zeros_like(design_matrix)
+        for i, values in enumerate(levels):
+            factor_matrix[:, i] = np.array(values)[design_matrix[:, i]]
+
+        self._design_sheet = pd.DataFrame(factor_matrix, columns=names)
+        return self._design_sheet
+
+    def _new_optimization_design(self):
+        mins = np.array([f.min for f in self.factors.values()])
+        maxes = np.array([f.max for f in self.factors.values()])
+        span = np.array([f.span for f in self.factors.values()])
+        centers = np.array([f.center for f in self.factors.values()])
+        factor_matrix = self._design_matrix * (span / 2.0) + centers
+
+        # Check if current settings are outside allowed design space.
+        # Also, for factors that are specified as ordinal, adjust their values
+        # in the design matrix to be rounded floats
+        for i, (factor_name, factor) in enumerate(self.factors.items()):
+            if factor.type == 'ordinal':
+                factor_matrix[:,i] = np.round(factor_matrix[:,i])
+            logging.debug('Current setting {}: {}'.format(factor_name, factor))
+
+        if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
+            logging.warning(('Out of design space factors. Adjusts factors'
+                             'by {}.'.format(self._edge_action + 'ing')))
+            if self._edge_action == 'distort':
+
+                # Simply cap out-of-boundary values at mins and maxes.
+                capped_mins = np.maximum(factor_matrix, mins)
+                capped_mins_and_maxes = np.minimum(capped_mins, maxes)
+                factor_matrix = capped_mins_and_maxes
+
+            elif self._edge_action == 'shrink':
+                raise NotImplementedError
+
+        self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
+        return self._design_sheet
 
 
 def Factor(factor_type, *args, **kwargs):
