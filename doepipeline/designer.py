@@ -214,8 +214,8 @@ class ExperimentDesigner(BaseExperimentDesigner):
             logging.debug('Current setting {}: {}'.format(factor_name, factor))
 
         if (factor_matrix < mins).any() or (factor_matrix > maxes).any():
-            logging.info(('Out of design space factors. Adjusts factors'
-                          'by {}.'.format(self._edge_action + 'ing')))
+            logging.warning(('Out of design space factors. Adjusts factors'
+                             'by {}.'.format(self._edge_action + 'ing')))
             if self._edge_action == 'distort':
 
                 # Simply cap out-of-boundary values at mins and maxes.
@@ -281,7 +281,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
             else:
                 new_center = optimal_x
 
-            logging.debug('New design center {} (old {})'.format(new_center,
+            logging.info('New design center {} (old {})'.format(new_center,
                                                                  centers))
 
             # Calculate the new highs and lows. Adjust the odrinal factors' values here.
@@ -307,7 +307,7 @@ class ExperimentDesigner(BaseExperimentDesigner):
             pd.Series(optimal_x, self._design_sheet.columns),
             converged, tol
         )
-        logging.debug('Current predicted optimum: {}'.format(
+        logging.info('Predicted optimum: {}'.format(
             results.predicted_optimum))
         return results
 
