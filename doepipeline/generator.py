@@ -3,7 +3,7 @@ import re
 import collections
 import os
 
-from doepipeline.designer import BaseExperimentDesigner, ExperimentDesigner
+from doepipeline.designer import ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
 
 
