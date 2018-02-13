@@ -128,7 +128,7 @@ class ExperimentDesigner:
     }
 
     def __init__(self, factors, design_type, responses, skip_screening=True,
-                 at_edges='distort', relative_step=.25):
+                 at_edges='distort', relative_step=.25, gsd_reduction='auto'):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
@@ -153,6 +153,7 @@ class ExperimentDesigner:
         self.step_length = relative_step
         self.design_type = design_type
         self.responses = responses
+        self.gsd_reduction = gsd_reduction
         self._edge_action = at_edges
         self._phase = 'optimization' if self.skip_screening else 'screening'
         n = len(self.factors)
@@ -174,7 +175,7 @@ class ExperimentDesigner:
         :rtype: pandas.DataFrame
         """
         if self._phase == 'screening':
-            return self._new_screening_design()
+            return self._new_screening_design(reduction=self.gsd_reduction)
         else:
             return self._new_optimization_design()
 

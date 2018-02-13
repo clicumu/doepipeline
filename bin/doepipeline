@@ -27,6 +27,20 @@ class Range:
         return '{0}-{1}'.format(self.start, self.end)
 
 
+def reduction_argument(value):
+    if value == 'auto':
+        return value
+
+    err_msg = '--reduction must be "auto" or positive integer'
+    try:
+        value = int(value)
+    except TypeError:
+        raise argparse.ArgumentTypeError(err_msg)
+    if value < 1:
+        raise argparse.ArgumentTypeError(err_msg)
+    return value
+
+
 def make_parser():
     """ Create and config argument-parser.
 
@@ -40,7 +54,7 @@ def make_parser():
     parser.add_argument('-e', '--execution', default='serial',
                           help=('how to execute steps in pipeline '
                                 '(default serial)'),
-                          choices=('serial', 'slurm'))
+                          choices=('serial', 'slurm', 'parallel'))
     parser.add_argument('-w', '--workdir',
                         help='working directory (default: .)',
                         default='.')
@@ -54,6 +68,13 @@ def make_parser():
                               'predicted optimum to edge of experimental '
                               'design in order to consider optimization '
                               'converged (default: 0.25)'))
+    parser.add_argument('--skip_screening', action='store_true',
+                        help=('If this flag is set, not screening will be run '
+                              'spanning all values from factor mins to factor '
+                              'maxes.'))
+    parser.add_argument('--screening_reduction', default='auto',
+                        type=reduction_argument,
+                        help='Reduction factor for GSD-screening (default auto)')
 
     parser.add_argument('--degree', type=int, choices=[Range(1, 3)],
                         default=2, help='degree of polynomial fitted during '
@@ -90,7 +111,8 @@ if __name__ == '__main__':
         sys.exit(str(e))
 
     logging.info('Initialize designer.')
-    designer = generator.new_designer_from_config()
+    designer = generator.new_designer_from_config(
+        skip_screening=args.skip_screening, gsd_reduction=args.screening_reduction)
 
     if args.execution == 'slurm':
         executor_class = SlurmPipelineExecutor
