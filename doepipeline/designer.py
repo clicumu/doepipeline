@@ -1,9 +1,7 @@
-import abc
-import os
+import logging
 import pyDOE2
 import numpy as np
 import pandas as pd
-import logging
 from scipy.optimize import minimize
 from collections import OrderedDict, namedtuple
 from itertools import combinations_with_replacement
@@ -159,11 +157,9 @@ class ExperimentDesigner:
         self._phase = 'optimization' if self.skip_screening else 'screening'
         n = len(self.factors)
         try:
-            matrix_designer = self._matrix_designers[self.design_type.lower()]
+            self._matrix_designers[self.design_type.lower()]
         except KeyError:
             raise UnsupportedDesign(self.design_type)
-        else:
-            self._design_matrix = matrix_designer(n)
 
         if len(self.responses) > 1:
             self._desirabilites = {name: make_desirability_function(factor)
@@ -270,7 +266,46 @@ class ExperimentDesigner:
         return results
 
     def _evaluate_screening(self, response, criterion):
-        raise NotImplementedError
+        logging.info('Evaluates screening results.')
+        if response.shape[1] > 1:
+            raise NotImplementedError
+        else:
+            response = response.iloc[:, 0]
+        factor_items = sorted(self.factors.items())
+        if criterion == 'maximize':
+            optimum_i = int(response.argmax())
+        elif criterion == 'minimize':
+            optimum_i = int(response.argmin())
+        else:
+            raise NotImplementedError
+
+        optimum_design_row = self._design_matrix[optimum_i]
+        optimum_settings = OrderedDict()
+
+        # Update all factors according to current results. For each factor,
+        # the current_high and current_low will be set to factors level above
+        # and below the point in the screening design with the best response.
+        for factor_level, (name, factor) in zip(optimum_design_row, factor_items):
+            optimum_settings[name] = self._design_sheet[name][factor_level]
+            factor_levels = sorted(self._design_sheet[name].unique())
+
+            min_ = factor_levels[max([0, factor_level - 1])]
+            max_ = factor_levels[min([factor_level + 1, len(factor_levels)])]
+
+            if isinstance(factor, OrdinalFactor):
+                min_ = int(np.round(min_))
+                max_ = int(np.round(max_))
+
+            factor.current_low = min_
+            factor.current_high = max_
+            logging.debug('New factor setting, {}: {}'.format(name, factor))
+
+        results = OptimizationResult(
+            pd.Series(optimum_settings), converged=False, tol=0
+        )
+        logging.info('Best screening result: {}'.format(
+            results.predicted_optimum))
+        return results
 
     def _new_screening_design(self, reduction='auto'):
         factor_items = sorted(self.factors.items())
@@ -288,7 +323,7 @@ class ExperimentDesigner:
             spacing = getattr(factor, 'screening_spacing', 'linear')
             min_ = factor.min
             max_ = factor.max
-            if min == float('-inf') or max == float('-inf'):
+            if not np.isfinite([min_, max_]).all():
                 raise ValueError('Can\'t perform screening with unbounded factors')
 
             space = np.linspace if spacing == 'linear' else np.logspace
@@ -305,10 +340,14 @@ class ExperimentDesigner:
         for i, values in enumerate(levels):
             factor_matrix[:, i] = np.array(values)[design_matrix[:, i]]
 
+        self._design_matrix = design_matrix
         self._design_sheet = pd.DataFrame(factor_matrix, columns=names)
         return self._design_sheet
 
     def _new_optimization_design(self):
+        matrix_designer = self._matrix_designers[self.design_type.lower()]
+        self._design_matrix = matrix_designer(len(self.factors))
+
         mins = np.array([f.min for f in self.factors.values()])
         maxes = np.array([f.max for f in self.factors.values()])
         span = np.array([f.span for f in self.factors.values()])
