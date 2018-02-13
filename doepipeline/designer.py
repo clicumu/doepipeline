@@ -287,8 +287,8 @@ class ExperimentDesigner:
         # the current_high and current_low will be set to factors level above
         # and below the point in the screening design with the best response.
         for factor_level, (name, factor) in zip(optimum_design_row, factor_items):
-            optimum_settings[name] = self._design_sheet[name][factor_level]
             factor_levels = sorted(self._design_sheet[name].unique())
+            optimum_settings[name] = factor_levels[factor_level]
 
             min_ = factor_levels[max([0, factor_level - 1])]
             max_ = factor_levels[min([factor_level + 1, len(factor_levels)])]
