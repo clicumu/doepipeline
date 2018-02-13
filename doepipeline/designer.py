@@ -243,12 +243,12 @@ class ExperimentDesigner:
             # FIXME: Should really new_center and spans be rounded before added?
             new_highs = [
                 int(round(new_center[i]) + round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] + spans / 2.0
+                if factor_type == 'ordinal' else new_center[i] + spans[i] / 2.0
                 for i, factor_type in enumerate(types)
             ]
             new_lows = [
                 int(round(new_center[i]) - round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] - spans / 2.0
+                if factor_type == 'ordinal' else new_center[i] - spans[i] / 2.0
                 for i, factor_type in enumerate(types)
             ]
             logging.info('Updates factor settings.')
