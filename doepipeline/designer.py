@@ -306,6 +306,8 @@ class ExperimentDesigner:
         )
         logging.info('Best screening result: {}'.format(
             results.predicted_optimum))
+
+        self._phase = 'optimization'
         return results
 
     def _new_screening_design(self, reduction='auto'):
