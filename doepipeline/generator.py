@@ -160,7 +160,7 @@ class PipelineGenerator:
         :raises: AssertionError
         """
         reserved_terms = ('before_run', 'pipeline', 'design', 'constants',
-                          'results_file', 'working_directory')
+                          'results_file', 'working_directory', 'SLURM')
         valid_before = 'environment_variables', 'scripts'
 
         assert 'pipeline' in config_dict, 'pipeline missing'
