@@ -1,4 +1,4 @@
-from collections import OrderedDict
+import logging
 from itertools import combinations_with_replacement, combinations, chain
 
 import numpy as np
@@ -6,7 +6,9 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from scipy.optimize import minimize
 
-from doepipeline.designer import OptimizationFailed
+
+class OptimizationFailed(Exception):
+    pass
 
 
 def make_desirability_function(response):
@@ -60,55 +62,48 @@ def make_desirability_function(response):
     return desirability
 
 
-def predict_optimum(design_sheet, response, criterion, factors, degree=2):
+def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwargs):
     """ Regress using `degree`-polynomial and optimize response.
-
-    :param pandas.DataFrame design_sheet: Factor settings.
-    :param pandas.Series response: Response Y-vector.
-    :param str criterion: 'maximize' | 'minimize'
-    :param int degree: Degree of polynomial to use for regression.
-    :return: Array with predicted optimum.
-    :rtype: numpy.ndarray[float]
-    :raises: OptimizationFailed
     """
-    matrix_columns = design_sheet.columns
-    n_rows, n_cols = design_sheet.shape
-    products = OrderedDict()
-    combinations = [list(comb) for deg in range(1, degree + 1)
-                    for comb in combinations_with_replacement(range(n_cols), deg)]
+    means = data_sheet.mean(axis=0)
+    stds = data_sheet.std(axis=0)
+    data_sheet = (data_sheet - means) / stds
 
-    # Multiply columns together.
-    for column_group in (matrix_columns[comb] for comb in combinations):
-        values = design_sheet[column_group].product(axis=1)
-        products['*'.join(column_group)] = values
+    x0 = data_sheet.median(axis=0).values
 
-    extended_sheet = pd.DataFrame(products)
+    data_sheet['_response'] = response
 
-    # Extend data-sheet with constants-column.
-    design_w_constants = np.hstack([np.ones((n_rows, 1)),
-                                    extended_sheet.values])
+    n_folds = kwargs.get('n_folds', 'loo')
+    n_folds = n_folds if n_folds != 'loo' else len(data_sheet)
+    model_selection = kwargs.get('model_selection', 'greedy')
+    if model_selection == 'greedy':
+        model, q2 = stepwise_regression(data_sheet, '_response', n_folds)
+    elif model_selection == 'brute':
+        model, q2 = brute_force_selection(data_sheet, '_response', n_folds)
+    else:
+        model = smf.ols(kwargs['manual_formula'], data_sheet).fit()
+        q2 = crossvalidate_formula(kwargs['manual_formula'], data_sheet,
+                                   '_response', n_folds)
 
-    # Regress using least squares.
-    c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
-    coefficients = c_stacked.flatten()
+    logging.info('Optimal model found (Q2={:.4f})'.format(q2))
+    logging.debug(str(model.summary()))
+
+    logging.info('Finds optimum of current design.')
+    factor_names = [name for name in factors.keys()]
     # Define optimization function for optimizer.
     def predicted_response(x, invert=False):
-        # Make extended factor list from given X.
-        factor_list = [1] + [np.product(x[comb]) for comb in combinations]
-        factors = np.array(factor_list)
-
-        # Calculate response.
-        factor_contributions = np.multiply(factors, coefficients)
-        return (-1 if invert else 1) * factor_contributions.sum()
-
-    # Since factors are set according to design the optimum is already
-    # guessed to be at the center of the design. Hence, use medians as
-    # initial guess.
-    x0 = design_sheet.median(axis=0).values
+        df = pd.DataFrame(np.atleast_2d(x), columns=factor_names)
+        return (-1 if invert else 1) * model.predict(df)[0]
 
     # Set up bounds for optimization to keep it inside the allowed design space.
-    mins = [f.min if f.min != '-inf' else None for f in factors.values()]
-    maxes = [f.max if f.max != 'inf' else None for f in factors.values()]
+    mins = list()
+    maxes = list()
+    for i, f in enumerate(factors.values()):
+        min_val = (f.min - means[i]) / stds[i] if np.isfinite(f.min) else None
+        max_val = (f.max - means[i]) / stds[i] if np.isfinite(f.max) else None
+        mins.append(min_val)
+        maxes.append(max_val)
+
     bounds = list(zip(mins, maxes))
 
     if criterion == 'maximize':
@@ -121,7 +116,8 @@ def predict_optimum(design_sheet, response, criterion, factors, degree=2):
     if not optimization_results['success']:
         raise OptimizationFailed(optimization_results['message'])
 
-    return optimization_results['x']
+    optimum = (optimization_results['x'] * stds) + means
+    return optimum
 
 
 def crossvalidate_formula(formula, data, response_column, k):
@@ -148,7 +144,7 @@ def crossvalidate_formula(formula, data, response_column, k):
 def stepwise_regression(data, response_column, k):
     formula_base = '{} ~ '.format(response_column)
     factor_columns = [col for col in data.columns if col != response_column]
-    are_quantitative = [np.issubdtype(dtype, np.number) for dtype in data.dtypes]
+    are_quantitative = [np.issubdtype(dtype, np.number) for dtype in data[factor_columns].dtypes]
     factor_columns = [col if is_quantitative else 'C({col})'.format(col=col)
                       for col, is_quantitative in zip(factor_columns, are_quantitative)]
 
@@ -161,8 +157,11 @@ def stepwise_regression(data, response_column, k):
         comb_q2.append((q2, f_c))
 
     best_q2, best_combination = sorted(comb_q2)[-1]
-    higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in enumerate(best_combination)
+    higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in enumerate(best_combination, start=1)
                     for other_fac in best_combination[i:]]
+    higher_order += ['np.power({}, 2)'.format(col)
+                     for col, is_quant in zip(factor_columns, are_quantitative)
+                     if is_quant and col in best_combination]
 
     while 'still_improving':
         term_results = list()
@@ -188,12 +187,15 @@ def brute_force_selection(data, response_column, k):
     formula_base = '{} ~ '.format(response_column)
     factor_columns = [col for col in data.columns if col != response_column]
     are_quantitative = [np.issubdtype(dtype, np.number) for dtype in
-                        data.dtypes]
+                        data[factor_columns].dtypes]
     factor_columns = [col if is_quantitative else 'C({col})'.format(col=col)
                       for col, is_quantitative in zip(factor_columns, are_quantitative)]
 
     higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in
-                    enumerate(factor_columns) for other_fac in factor_columns[i:]]
+                    enumerate(factor_columns, 1) for other_fac in factor_columns[i:]]
+    higher_order += ['np.power({}, 2)'.format(col)
+                     for col, is_quant in zip(factor_columns, are_quantitative)
+                     if is_quant]
     all_factors = factor_columns + higher_order
     combs = (combinations(all_factors, r) for r in range(1, len(all_factors) + 1))
     factor_combinations = list(chain.from_iterable(combs))
@@ -203,6 +205,7 @@ def brute_force_selection(data, response_column, k):
         q2 = crossvalidate_formula(formula_base + '+'.join(f_c), data,
                                    response_column, k)
         comb_q2.append((q2, f_c))
+
 
     best_q2, best_combination = sorted(comb_q2)[-1]
     model = smf.ols(formula_base + ' + '.join(best_combination), data).fit()

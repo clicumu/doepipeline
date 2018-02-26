@@ -3,9 +3,11 @@ from collections import OrderedDict, namedtuple
 
 import numpy as np
 import pandas as pd
+import statsmodels.formula.api as smf
 import pyDOE2
 
-from doepipeline.model_utils import make_desirability_function, predict_optimum
+from doepipeline.model_utils import make_desirability_function, predict_optimum, \
+    brute_force_selection, stepwise_regression, crossvalidate_formula
 
 
 class OptimizationResult(namedtuple(
@@ -21,8 +23,6 @@ class UnsupportedDesign(Exception):
     pass
 
 
-class OptimizationFailed(Exception):
-    pass
 
 
 class NumericFactor:
@@ -129,12 +129,20 @@ class ExperimentDesigner:
     }
 
     def __init__(self, factors, design_type, responses, skip_screening=True,
-                 at_edges='distort', relative_step=.25, gsd_reduction='auto'):
+                 at_edges='distort', relative_step=.25, gsd_reduction='auto',
+                 model_selection='brute', n_folds='loo', manual_formula=None):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
             assert relative_step is None or 0 < relative_step < 1,\
                 'relative_step must be float between 0 and 1 not {}'.format(relative_step)
+            assert model_selection in ('brute', 'greedy', 'manual'), \
+                'model_selection must be "brute", "greedy", "manual".'
+            assert n_folds == 'loo' or (isinstance(n_folds, int) and n_folds > 0), \
+                'n_folds must be "loo" or positive integer'
+            if model_selection == 'manual':
+                assert isinstance(manual_formula, str), \
+                    'If model_selection is "manual" formula must be provided.'
         except AssertionError as e:
             raise ValueError(str(e))
 
@@ -155,6 +163,9 @@ class ExperimentDesigner:
         self.design_type = design_type
         self.responses = responses
         self.gsd_reduction = gsd_reduction
+        self.model_selection = model_selection
+        self.n_folds = n_folds
+        self._formula = manual_formula
         self._edge_action = at_edges
         self._phase = 'optimization' if self.skip_screening else 'screening'
         n = len(self.factors)
@@ -210,9 +221,18 @@ class ExperimentDesigner:
 
     def _evaluate_optimization(self, response, degree, tol, criterion):
         # Find predicted optimal factor setting.
-        logging.info('Finds optimum of current design.')
-        optimal_x = predict_optimum(self._design_sheet, response,
-                                    criterion, self.factors, degree)
+        logging.info('Finds optimal model')
+
+        if response.shape[1] > 1:
+            response = sum([self._desirabilites[col](values).values
+                            for col, values in response.iteritems()])
+        else:
+            response = response.iloc[:, 0].values
+
+        optimal_x = predict_optimum(self._design_sheet, response, self.factors,
+                                    criterion, n_folds=self.n_folds,
+                                    model_selection=self.model_selection,
+                                    manual_formula=self._formula)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
