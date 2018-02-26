@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, combinations, chain
 
 import numpy as np
 import pandas as pd
@@ -122,3 +122,88 @@ def predict_optimum(design_sheet, response, criterion, factors, degree=2):
         raise OptimizationFailed(optimization_results['message'])
 
     return optimization_results['x']
+
+
+def crossvalidate_formula(formula, data, response_column, k):
+    PRESS = 0
+    for i in range(k):
+        start = i * (len(data) // k)
+        end = (i + 1) * (len(data) // k) if i < k - 1 else len(data)
+
+        to_drop = data.index[start: end]
+
+        train = data.drop(to_drop)
+        test = data.loc[to_drop]
+
+        model = smf.ols(formula, train).fit()
+        pred = model.predict(test)
+        residuals = test[response_column] - pred
+        PRESS += (residuals ** 2).sum()
+
+    response = data[response_column]
+    Q2 = 1 - PRESS / ((response - response.mean()) ** 2).sum()
+    return Q2
+
+
+def stepwise_regression(data, response_column, k):
+    formula_base = '{} ~ '.format(response_column)
+    factor_columns = [col for col in data.columns if col != response_column]
+    are_quantitative = [np.issubdtype(dtype, np.number) for dtype in data.dtypes]
+    factor_columns = [col if is_quantitative else 'C({col})'.format(col=col)
+                      for col, is_quantitative in zip(factor_columns, are_quantitative)]
+
+    combs = (combinations(factor_columns, r) for r in range(1, len(factor_columns) + 1))
+    factor_combinations = list(chain.from_iterable(combs))
+
+    comb_q2 = list()
+    for f_c in factor_combinations:
+        q2 = crossvalidate_formula(formula_base + '+'.join(f_c), data, response_column, k)
+        comb_q2.append((q2, f_c))
+
+    best_q2, best_combination = sorted(comb_q2)[-1]
+    higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in enumerate(best_combination)
+                    for other_fac in best_combination[i:]]
+
+    while 'still_improving':
+        term_results = list()
+        for term in higher_order:
+            terms = [term] + list(best_combination)
+            q2 = crossvalidate_formula(formula_base + '+'.join(terms), data, response_column, k)
+            term_results.append((q2, term))
+
+        current_best_q2, current_best_term = sorted(term_results)[-1]
+
+        if current_best_q2 > best_q2:
+            best_combination = [current_best_term] + list(best_combination)
+            higher_order.remove(current_best_term)
+            best_q2 = current_best_q2
+        else:
+            break
+
+    model = smf.ols(formula_base + ' + '.join(best_combination), data).fit()
+    return model, best_q2
+
+
+def brute_force_selection(data, response_column, k):
+    formula_base = '{} ~ '.format(response_column)
+    factor_columns = [col for col in data.columns if col != response_column]
+    are_quantitative = [np.issubdtype(dtype, np.number) for dtype in
+                        data.dtypes]
+    factor_columns = [col if is_quantitative else 'C({col})'.format(col=col)
+                      for col, is_quantitative in zip(factor_columns, are_quantitative)]
+
+    higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in
+                    enumerate(factor_columns) for other_fac in factor_columns[i:]]
+    all_factors = factor_columns + higher_order
+    combs = (combinations(all_factors, r) for r in range(1, len(all_factors) + 1))
+    factor_combinations = list(chain.from_iterable(combs))
+
+    comb_q2 = list()
+    for f_c in factor_combinations:
+        q2 = crossvalidate_formula(formula_base + '+'.join(f_c), data,
+                                   response_column, k)
+        comb_q2.append((q2, f_c))
+
+    best_q2, best_combination = sorted(comb_q2)[-1]
+    model = smf.ols(formula_base + ' + '.join(best_combination), data).fit()
+    return model, best_q2
