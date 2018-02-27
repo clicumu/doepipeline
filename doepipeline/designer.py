@@ -34,7 +34,6 @@ class NumericFactor:
 
     Can't be instantiated.
     """
-    type = None
 
     def __init__(self, factor_max, factor_min, current_low=None, current_high=None):
         if type(self) == NumericFactor:
@@ -68,8 +67,6 @@ class QuantitativeFactor(NumericFactor):
 
     """ Real value factors. """
 
-    type = 'quantitative'
-
 
 class OrdinalFactor(NumericFactor):
 
@@ -77,8 +74,6 @@ class OrdinalFactor(NumericFactor):
 
     Attributes are checked to be integers (or None/inf if allowed).
     """
-
-    type = 'ordinal'
 
     def __setattr__(self, attribute, value):
         """ Check values `current_low`, `current_high`, `max` and `min`.
@@ -109,8 +104,6 @@ class OrdinalFactor(NumericFactor):
 class CategoricalFactor:
 
     """ Multilevel categorical factors. """
-
-    type = 'categorical'
 
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
@@ -376,7 +369,7 @@ class ExperimentDesigner:
         # Also, for factors that are specified as ordinal, adjust their values
         # in the design matrix to be rounded floats
         for i, (factor_name, factor) in enumerate(self.factors.items()):
-            if factor.type == 'ordinal':
+            if isinstance(factor, OrdinalFactor):
                 factor_matrix[:,i] = np.round(factor_matrix[:,i])
             logging.debug('Current setting {}: {}'.format(factor_name, factor))
 
