@@ -191,7 +191,7 @@ class ExperimentDesigner:
         else:
             return self._new_optimization_design()
 
-    def update_factors_from_response(self, response, degree=2, tol=.25):
+    def update_factors_from_response(self, response, tol=.25):
         """ Calculate optimal factor settings given response and update
         factor settings to center around optimum. Returns calculated
         optimum.
@@ -213,26 +213,29 @@ class ExperimentDesigner:
         if response.shape[1] == 1:
             criterion = list(self.responses.values())[0]['criterion']
         else:
-            raise NotImplementedError
+            logging.info(('Multiple response, combines using '
+                          'desirability functions'))
+            combined_response = sum([self._desirabilites[col](values).values
+                                     for col, values in response.iteritems()])
+            response = pd.DataFrame(combined_response, index=response.index)
+            criterion = 'maximize'
+
         if self._phase == 'screening':
             return self._evaluate_screening(response, criterion)
         else:
-            return self._evaluate_optimization(response, degree, tol, criterion)
+            return self._evaluate_optimization(response, tol, criterion)
 
-    def _evaluate_optimization(self, response, degree, tol, criterion):
+    def _evaluate_optimization(self, response, tol, criterion):
         # Find predicted optimal factor setting.
         logging.info('Finds optimal model')
 
-        if response.shape[1] > 1:
-            response = sum([self._desirabilites[col](values).values
-                            for col, values in response.iteritems()])
-        else:
-            response = response.iloc[:, 0].values
-
-        optimal_x = predict_optimum(self._design_sheet, response, self.factors,
-                                    criterion, n_folds=self.n_folds,
-                                    model_selection=self.model_selection,
-                                    manual_formula=self._formula)
+        optimal_x, model = predict_optimum(self._design_sheet,
+                                           response.iloc[:, 0].values,
+                                           self.factors,
+                                           criterion,
+                                           n_folds=self.n_folds,
+                                           model_selection=self.model_selection,
+                                           manual_formula=self._formula)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
@@ -289,10 +292,7 @@ class ExperimentDesigner:
 
     def _evaluate_screening(self, response, criterion):
         logging.info('Evaluates screening results.')
-        if response.shape[1] > 1:
-            raise NotImplementedError
-        else:
-            response = response.iloc[:, 0]
+        response = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
             optimum_i = int(response.argmax())

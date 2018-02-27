@@ -117,7 +117,7 @@ def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwarg
         raise OptimizationFailed(optimization_results['message'])
 
     optimum = (optimization_results['x'] * stds) + means
-    return optimum
+    return optimum, model
 
 
 def crossvalidate_formula(formula, data, response_column, k):
