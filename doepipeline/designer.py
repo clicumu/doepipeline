@@ -239,48 +239,42 @@ class ExperimentDesigner:
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        factor_info = [(f.span, f.current_high, f.current_low, f.center, f.type)
-                       for f in self.factors.values()]
-        spans, old_highs, old_lows, centers, types = map(np.array, zip(*factor_info))
-        ratios = (old_highs - optimal_x) / spans
+        centers = np.array([f.center for f in self.factors.values()])
+        spans = np.array([f.span for f in self.factors.values()])
 
-        if np.logical_and(ratios > tol, ratios < 1 - tol).all():
+        ratios = (optimal_x - centers) / spans
+
+        if (abs(ratios) < tol).all():
             converged = True
             logging.info('Convergence reached.')
         else:
             converged = False
             logging.info('Convergence not reached. Moves design.')
 
-            # Calculate the new design center.
-            if self.step_length is not None:
-                allowed = spans * self.step_length
-                diff = optimal_x - centers
-                shift = allowed * (diff / np.linalg.norm(diff))
-                new_center = centers + shift
-            else:
-                new_center = optimal_x
+            for ratio, (name, factor) in zip(ratios, self.factors.items()):
+                if abs(ratio) < tol:
+                    logging.debug(('Factor {} not updated - within tolerance '
+                                   'limits.').format(name))
+                    continue
 
-            logging.info('New design center {} (old {})'.format(new_center,
-                                                                 centers))
+                elif not any(name in param for param in model.params.index):
+                    logging.debug(('Factor {} not updated - not used as factor '
+                                   'in optimal model.').format(name))
+                    continue
 
-            # Calculate the new highs and lows. Adjust the odrinal factors' values here.
-            # FIXME: Should really new_center and spans be rounded before added?
-            new_highs = [
-                int(round(new_center[i]) + round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] + spans[i] / 2.0
-                for i, factor_type in enumerate(types)
-            ]
-            new_lows = [
-                int(round(new_center[i]) - round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] - spans[i] / 2.0
-                for i, factor_type in enumerate(types)
-            ]
-            logging.info('Updates factor settings.')
-            for i, key in enumerate(self._design_sheet.columns):
-                self.factors[key].current_high = new_highs[i]
-                self.factors[key].current_low = new_lows[i]
-                logging.debug('New factor setting, {}: {}'.format(key,
-                                                                  self.factors[key]))
+                logging.debug('Updates factor {}: {}'.format(name, factor))
+                step_length = self.step_length if self.step_length is not None \
+                    else abs(ratio)
+                if isinstance(factor, QuantitativeFactor):
+                    step = factor.span * step_length * np.sign(ratio)
+                elif isinstance(factor, OrdinalFactor):
+                    step = np.round(factor.span * step_length) * np.sign(ratio)
+                else:
+                    raise NotImplementedError
+
+                factor.current_low += step
+                factor.current_high += step
+                logging.debug('Factor {} updated: {}'.format(name, factor))
 
         results = OptimizationResult(
             pd.Series(optimal_x, self._design_sheet.columns),
