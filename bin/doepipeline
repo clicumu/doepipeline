@@ -129,7 +129,10 @@ if __name__ == '__main__':
     while n_iter < args.maxiter:
         n_iter += 1
 
-        logging.info('Starts optimization iteration {}.'.format(n_iter))
+        if not args.skip_screening and n_iter==1:
+            logging.info('Starts iteration {} (screening).'.format(n_iter))
+        else:
+            logging.info('Starts iteration {} (optimization).'.format(n_iter))
 
         iter_workdir = os.path.join(args.workdir, 'iter_'.format(n_iter))
         logging.info('Current working-directory: {}'.format(iter_workdir))
@@ -140,6 +143,7 @@ if __name__ == '__main__':
 
         logging.info('Sets up new design.')
         design = designer.new_design()
+        logging.info('The following experiments will be run:\n{}'.format(design))
 
         logging.info('Prepares pipeline with design parameters.')
         pipeline = generator.new_pipeline_collection(design)
