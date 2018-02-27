@@ -236,6 +236,10 @@ class ExperimentDesigner:
         spans = np.array([f.span for f in self.factors.values()])
 
         ratios = (optimal_x - centers) / spans
+        logging.debug(
+            'The distance of the factor optimas from the factor centers, ' 
+            'expressed as the ratio of the step length:\n{}'.format(ratios)
+        )
 
         if (abs(ratios) < tol).all():
             converged = True
@@ -265,16 +269,48 @@ class ExperimentDesigner:
                 else:
                     raise NotImplementedError
 
+                # If the proposed step change takes us below or above min and max:
+                if factor.current_low + step < factor.min:
+                    nudge = abs(factor.current_low + step - factor.min)
+                    logging.debug(
+                        'Factor {}: minimum allowed setting ({}) would be exceeded '
+                        '({}) by the proposed step change.'
+                        .format(name, factor.min, factor.current_low + step))
+                    step += nudge
+                    logging.debug(
+                        'Adjusting step by {}, new step is {}.'.format(nudge, step))
+
+                elif factor.current_high + step > factor.max:
+                    nudge = abs(factor.current_high + step - factor.max)
+                    logging.debug(
+                        'Factor {}: maximum allowed setting ({}) would be exceeded '
+                        '({}) by the proposed step change.'
+                        .format(name, factor.max, factor.current_high + step))
+                    step -= nudge
+                    logging.debug(
+                        'Adjusting step by -{}, new step is {}.'.format(nudge, step))
+
                 factor.current_low += step
                 factor.current_high += step
                 logging.debug('Factor {} updated: {}'.format(name, factor))
+
+        # It's possible that the optimum is predicted to be at the edge of the allowed
+        # min or max factor setting. This will produce a high 'ratio' and the algorithm
+        # is not considered to have converged (above). However, in this situation we
+        # can't move the space any further and we should stop iterating.
+        new_centers =  np.array([f.center for f in self.factors.values()])
+        if (centers == new_centers).all():
+            logging.info('The design has not moved since last iteration. Converged.')
+            converged = True
 
         results = OptimizationResult(
             pd.Series(optimal_x, self._design_sheet.columns),
             converged, tol
         )
-        logging.info('Predicted optimum: {}'.format(
+
+        logging.info('Predicted optimum:\n{}'.format(
             results.predicted_optimum))
+
         return results
 
     def _evaluate_screening(self, response, criterion):
@@ -312,7 +348,8 @@ class ExperimentDesigner:
         results = OptimizationResult(
             pd.Series(optimum_settings), converged=False, tol=0
         )
-        logging.info('Best screening result: {}'.format(
+        logging.info
+        logging.info('Best screening result:\n{}'.format(
             results.predicted_optimum))
 
         self._phase = 'optimization'

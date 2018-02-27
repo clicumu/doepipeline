@@ -71,6 +71,11 @@ def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwarg
 
     x0 = data_sheet.median(axis=0).values
 
+    # Set up bounds for optimization to keep it inside the current design space.
+    mins = data_sheet.min(axis=0)
+    maxes = data_sheet.max(axis=0)
+    bounds = list(zip(mins, maxes))
+
     data_sheet['_response'] = response
 
     n_folds = kwargs.get('n_folds', 'loo')
@@ -90,21 +95,11 @@ def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwarg
 
     logging.info('Finds optimum of current design.')
     factor_names = [name for name in factors.keys()]
+    
     # Define optimization function for optimizer.
     def predicted_response(x, invert=False):
         df = pd.DataFrame(np.atleast_2d(x), columns=factor_names)
         return (-1 if invert else 1) * model.predict(df)[0]
-
-    # Set up bounds for optimization to keep it inside the allowed design space.
-    mins = list()
-    maxes = list()
-    for i, f in enumerate(factors.values()):
-        min_val = (f.min - means[i]) / stds[i] if np.isfinite(f.min) else None
-        max_val = (f.max - means[i]) / stds[i] if np.isfinite(f.max) else None
-        mins.append(min_val)
-        maxes.append(max_val)
-
-    bounds = list(zip(mins, maxes))
 
     if criterion == 'maximize':
         optimization_results = minimize(lambda x: predicted_response(x, True),
