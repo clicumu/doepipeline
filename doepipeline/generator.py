@@ -88,8 +88,8 @@ class PipelineGenerator:
 
         Example output:
         pipeline_collection = {
-            '0': ['./script_one --param 1', './script_two --other-param 3'],
-            '1': ['./script_one --param 2', './script_two --other-param 4'],
+            0: ['./script_one --param 1', './script_two --other-param 3'],
+            1: ['./script_one --param 2', './script_two --other-param 4'],
             ...
         }
 
@@ -107,9 +107,9 @@ class PipelineGenerator:
 
         for i, experiment in experiment_design.iterrows():
             if exp_id_column is not None:
-                exp_id = str(experiment[exp_id_column])
+                exp_id = experiment[exp_id_column]
             else:
-                exp_id = str(i)
+                exp_id = i
 
             rendered_scripts = list()
 

@@ -111,7 +111,7 @@ class TestMakePipeline(BaseGeneratorTestCase):
     def test_render_experiments_without_id_column(self):
         pipeline_collection = self.runner.new_pipeline_collection(self.dummy_design)
         expected = {
-            '0': self.scripts1, '1': self.scripts2,
+            0: self.scripts1, 1: self.scripts2,
             'ENV_VARIABLES': self.env_vars, 'SETUP_SCRIPTS': None,
             'RESULTS_FILE': self.config['results_file'],
             'WORKDIR': self.config['working_directory'],
