@@ -3,11 +3,10 @@ from collections import OrderedDict, namedtuple
 
 import numpy as np
 import pandas as pd
-import statsmodels.formula.api as smf
+import scipy.stats
 import pyDOE2
 
-from doepipeline.model_utils import make_desirability_function, predict_optimum, \
-    brute_force_selection, stepwise_regression, crossvalidate_formula
+from doepipeline.model_utils import make_desirability_function, predict_optimum
 
 
 class OptimizationResult(namedtuple(
@@ -21,8 +20,6 @@ class UnsupportedFactorType(Exception):
 
 class UnsupportedDesign(Exception):
     pass
-
-
 
 
 class NumericFactor:
@@ -203,15 +200,33 @@ class ExperimentDesigner:
         :returns: Calculated optimum.
         :rtype: OptimizationResult
         """
-        if response.shape[1] == 1:
-            criterion = list(self.responses.values())[0]['criterion']
-        else:
+        response = response.copy()
+        has_multiple_responses = response.shape[1] > 1
+        for name, spec in self.responses.items():
+            transform = spec.get('transform', None)
+            response_values = response[name]
+
+            if transform == 'log':
+                logging.debug('Log-transforms response {}'.format(name))
+                response_values = np.log(response_values)
+            elif transform == 'box-cox':
+                response_values, lambda_ = scipy.stats.boxcox(response_values)
+                logging.debug('Box-cox transformed response {} '
+                              '(lambda={:.4f})'.format(name, lambda_))
+
+            if has_multiple_responses:
+                desirability_function = self._desirabilites[name]
+                response_values = desirability_function(response_values)
+            response[name] = response_values
+
+        if has_multiple_responses:
             logging.info(('Multiple response, combines using '
                           'desirability functions'))
-            combined_response = sum([self._desirabilites[col](values).values
-                                     for col, values in response.iteritems()])
-            response = pd.DataFrame(combined_response, index=response.index)
+            response = response.sum(axis=1).to_frame('combined_response')
             criterion = 'maximize'
+
+        else:
+            criterion = list(self.responses.values())[0]['criterion']
 
         if self._phase == 'screening':
             return self._evaluate_screening(response, criterion)
