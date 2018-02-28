@@ -79,7 +79,11 @@ class TestLocalSerialRun(BaseRunTestCase):
         expected_optimum = {'FactorA': 5, 'FactorB': 5}
         self.assertFalse(optimum.converged)
         for factor in design.columns:
-            self.assertTrue(np.isclose(optimum.predicted_optimum[factor],
+            # Optimum is outside of bounds and optimization should be
+            # constrained to be inside design space. So the expected
+            # optimum should not have been predicted after a single
+            # iteration.
+            self.assertFalse(np.isclose(optimum.predicted_optimum[factor],
                                        expected_optimum[factor]))
 
 
