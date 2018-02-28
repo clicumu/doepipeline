@@ -38,7 +38,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
                     self.running_jobs.pop(job_name)
 
         if still_running:
-            msg = '{} still running'.format(', '.join(still_running))
+            msg = '{} still running'.format(', '.join(map(str, still_running)))
             return self.JOB_RUNNING, msg
         else:
             logging.info('All jobs finished.')
@@ -107,7 +107,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
         for i, step in enumerate(job_steps.values(), start=1):
             logging.info('Starts pipeline step: {}'.format(step))
             for script, job_name in zip(step, experiment_index):
-                current_workdir = os.path.join(self.workdir, job_name)
+                current_workdir = os.path.join(self.workdir, str(job_name))
 
                 log_file = self.base_log.format(name=job_name, i=i)
 

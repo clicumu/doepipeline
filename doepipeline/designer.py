@@ -1,10 +1,13 @@
 import logging
-import pyDOE2
+from collections import OrderedDict, namedtuple
+
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
-from collections import OrderedDict, namedtuple
-from itertools import combinations_with_replacement
+import statsmodels.formula.api as smf
+import pyDOE2
+
+from doepipeline.model_utils import make_desirability_function, predict_optimum, \
+    brute_force_selection, stepwise_regression, crossvalidate_formula
 
 
 class OptimizationResult(namedtuple(
@@ -20,8 +23,6 @@ class UnsupportedDesign(Exception):
     pass
 
 
-class OptimizationFailed(Exception):
-    pass
 
 
 class NumericFactor:
@@ -33,7 +34,6 @@ class NumericFactor:
 
     Can't be instantiated.
     """
-    type = None
 
     def __init__(self, factor_max, factor_min, current_low=None, current_high=None):
         if type(self) == NumericFactor:
@@ -67,8 +67,6 @@ class QuantitativeFactor(NumericFactor):
 
     """ Real value factors. """
 
-    type = 'quantitative'
-
 
 class OrdinalFactor(NumericFactor):
 
@@ -76,8 +74,6 @@ class OrdinalFactor(NumericFactor):
 
     Attributes are checked to be integers (or None/inf if allowed).
     """
-
-    type = 'ordinal'
 
     def __setattr__(self, attribute, value):
         """ Check values `current_low`, `current_high`, `max` and `min`.
@@ -109,8 +105,6 @@ class CategoricalFactor:
 
     """ Multilevel categorical factors. """
 
-    type = 'categorical'
-
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -122,18 +116,26 @@ class ExperimentDesigner:
         'fullfactorial3levels': lambda n: pyDOE2.fullfact([3] * n),
         'placketburman': pyDOE2.pbdesign,
         'boxbehnken': lambda n: pyDOE2.bbdesign(n, 1),
-        'ccc': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccc'),
-        'ccf': lambda n: pyDOE2.ccdesign(n, (0, 1), face='ccf'),
-        'cci': lambda n: pyDOE2.ccdesign(n, (0, 1), face='cci'),
+        'ccc': lambda n: pyDOE2.ccdesign(n, (0, 3), face='ccc'),
+        'ccf': lambda n: pyDOE2.ccdesign(n, (0, 3), face='ccf'),
+        'cci': lambda n: pyDOE2.ccdesign(n, (0, 3), face='cci'),
     }
 
     def __init__(self, factors, design_type, responses, skip_screening=True,
-                 at_edges='distort', relative_step=.25, gsd_reduction='auto'):
+                 at_edges='distort', relative_step=.25, gsd_reduction='auto',
+                 model_selection='brute', n_folds='loo', manual_formula=None):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
             assert relative_step is None or 0 < relative_step < 1,\
                 'relative_step must be float between 0 and 1 not {}'.format(relative_step)
+            assert model_selection in ('brute', 'greedy', 'manual'), \
+                'model_selection must be "brute", "greedy", "manual".'
+            assert n_folds == 'loo' or (isinstance(n_folds, int) and n_folds > 0), \
+                'n_folds must be "loo" or positive integer'
+            if model_selection == 'manual':
+                assert isinstance(manual_formula, str), \
+                    'If model_selection is "manual" formula must be provided.'
         except AssertionError as e:
             raise ValueError(str(e))
 
@@ -154,6 +156,9 @@ class ExperimentDesigner:
         self.design_type = design_type
         self.responses = responses
         self.gsd_reduction = gsd_reduction
+        self.model_selection = model_selection
+        self.n_folds = n_folds
+        self._formula = manual_formula
         self._edge_action = at_edges
         self._phase = 'optimization' if self.skip_screening else 'screening'
         n = len(self.factors)
@@ -179,7 +184,7 @@ class ExperimentDesigner:
         else:
             return self._new_optimization_design()
 
-    def update_factors_from_response(self, response, degree=2, tol=.25):
+    def update_factors_from_response(self, response, tol=.25):
         """ Calculate optimal factor settings given response and update
         factor settings to center around optimum. Returns calculated
         optimum.
@@ -201,77 +206,116 @@ class ExperimentDesigner:
         if response.shape[1] == 1:
             criterion = list(self.responses.values())[0]['criterion']
         else:
-            raise NotImplementedError
+            logging.info(('Multiple response, combines using '
+                          'desirability functions'))
+            combined_response = sum([self._desirabilites[col](values).values
+                                     for col, values in response.iteritems()])
+            response = pd.DataFrame(combined_response, index=response.index)
+            criterion = 'maximize'
+
         if self._phase == 'screening':
             return self._evaluate_screening(response, criterion)
         else:
-            return self._evaluate_optimization(response, degree, tol, criterion)
+            return self._evaluate_optimization(response, tol, criterion)
 
-    def _evaluate_optimization(self, response, degree, tol, criterion):
+    def _evaluate_optimization(self, response, tol, criterion):
         # Find predicted optimal factor setting.
-        logging.info('Finds optimum of current design.')
-        optimal_x = predict_optimum(self._design_sheet, response,
-                                    criterion, self.factors, degree)
+        logging.info('Finds optimal model')
+
+        optimal_x, model = predict_optimum(self._design_sheet,
+                                           response.iloc[:, 0].values,
+                                           self.factors,
+                                           criterion,
+                                           n_folds=self.n_folds,
+                                           model_selection=self.model_selection,
+                                           manual_formula=self._formula)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        factor_info = [(f.span, f.current_high, f.current_low, f.center, f.type)
-                       for f in self.factors.values()]
-        spans, old_highs, old_lows, centers, types = map(np.array, zip(*factor_info))
-        ratios = (old_highs - optimal_x) / spans
+        centers = np.array([f.center for f in self.factors.values()])
+        spans = np.array([f.span for f in self.factors.values()])
 
-        if np.logical_and(ratios > tol, ratios < 1 - tol).all():
+        ratios = (optimal_x - centers) / spans
+        logging.debug(
+            'The distance of the factor optimas from the factor centers, ' 
+            'expressed as the ratio of the step length:\n{}'.format(ratios)
+        )
+
+        if (abs(ratios) < tol).all():
             converged = True
             logging.info('Convergence reached.')
         else:
             converged = False
             logging.info('Convergence not reached. Moves design.')
 
-            # Calculate the new design center.
-            if self.step_length is not None:
-                allowed = spans * self.step_length
-                diff = optimal_x - centers
-                shift = allowed * (diff / np.linalg.norm(diff))
-                new_center = centers + shift
-            else:
-                new_center = optimal_x
+            for ratio, (name, factor) in zip(ratios, self.factors.items()):
+                if abs(ratio) < tol:
+                    logging.debug(('Factor {} not updated - within tolerance '
+                                   'limits.').format(name))
+                    continue
 
-            logging.info('New design center {} (old {})'.format(new_center,
-                                                                 centers))
+                elif not any(name in param for param in model.params.index):
+                    logging.debug(('Factor {} not updated - not used as factor '
+                                   'in optimal model.').format(name))
+                    continue
 
-            # Calculate the new highs and lows. Adjust the odrinal factors' values here.
-            # FIXME: Should really new_center and spans be rounded before added?
-            new_highs = [
-                int(round(new_center[i]) + round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] + spans[i] / 2.0
-                for i, factor_type in enumerate(types)
-            ]
-            new_lows = [
-                int(round(new_center[i]) - round(spans[i] / 2.0))
-                if factor_type == 'ordinal' else new_center[i] - spans[i] / 2.0
-                for i, factor_type in enumerate(types)
-            ]
-            logging.info('Updates factor settings.')
-            for i, key in enumerate(self._design_sheet.columns):
-                self.factors[key].current_high = new_highs[i]
-                self.factors[key].current_low = new_lows[i]
-                logging.debug('New factor setting, {}: {}'.format(key,
-                                                                  self.factors[key]))
+                logging.debug('Updates factor {}: {}'.format(name, factor))
+                step_length = self.step_length if self.step_length is not None \
+                    else abs(ratio)
+                if isinstance(factor, QuantitativeFactor):
+                    step = factor.span * step_length * np.sign(ratio)
+                elif isinstance(factor, OrdinalFactor):
+                    step = np.round(factor.span * step_length) * np.sign(ratio)
+                else:
+                    raise NotImplementedError
+
+                # If the proposed step change takes us below or above min and max:
+                if factor.current_low + step < factor.min:
+                    nudge = abs(factor.current_low + step - factor.min)
+                    logging.debug(
+                        'Factor {}: minimum allowed setting ({}) would be exceeded '
+                        '({}) by the proposed step change.'
+                        .format(name, factor.min, factor.current_low + step))
+                    step += nudge
+                    logging.debug(
+                        'Adjusting step by {}, new step is {}.'.format(nudge, step))
+
+                elif factor.current_high + step > factor.max:
+                    nudge = abs(factor.current_high + step - factor.max)
+                    logging.debug(
+                        'Factor {}: maximum allowed setting ({}) would be exceeded '
+                        '({}) by the proposed step change.'
+                        .format(name, factor.max, factor.current_high + step))
+                    step -= nudge
+                    logging.debug(
+                        'Adjusting step by -{}, new step is {}.'.format(nudge, step))
+
+                factor.current_low += step
+                factor.current_high += step
+                logging.debug('Factor {} updated: {}'.format(name, factor))
+
+        # It's possible that the optimum is predicted to be at the edge of the allowed
+        # min or max factor setting. This will produce a high 'ratio' and the algorithm
+        # is not considered to have converged (above). However, in this situation we
+        # can't move the space any further and we should stop iterating.
+        new_centers =  np.array([f.center for f in self.factors.values()])
+        if (centers == new_centers).all():
+            logging.info('The design has not moved since last iteration. Converged.')
+            converged = True
 
         results = OptimizationResult(
             pd.Series(optimal_x, self._design_sheet.columns),
             converged, tol
         )
-        logging.info('Predicted optimum: {}'.format(
+
+        logging.info('Predicted optimum:\n{}'.format(
             results.predicted_optimum))
+
         return results
 
     def _evaluate_screening(self, response, criterion):
         logging.info('Evaluates screening results.')
-        if response.shape[1] > 1:
-            raise NotImplementedError
-        else:
-            response = response.iloc[:, 0]
+        response = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
             optimum_i = int(response.argmax())
@@ -304,7 +348,8 @@ class ExperimentDesigner:
         results = OptimizationResult(
             pd.Series(optimum_settings), converged=False, tol=0
         )
-        logging.info('Best screening result: {}'.format(
+        logging.info
+        logging.info('Best screening result:\n{}'.format(
             results.predicted_optimum))
 
         self._phase = 'optimization'
@@ -361,7 +406,7 @@ class ExperimentDesigner:
         # Also, for factors that are specified as ordinal, adjust their values
         # in the design matrix to be rounded floats
         for i, (factor_name, factor) in enumerate(self.factors.items()):
-            if factor.type == 'ordinal':
+            if isinstance(factor, OrdinalFactor):
                 factor_matrix[:,i] = np.round(factor_matrix[:,i])
             logging.debug('Current setting {}: {}'.format(factor_name, factor))
 
@@ -398,118 +443,3 @@ def Factor(factor_type, *args, **kwargs):
         return CategoricalFactor(*args, **kwargs)
     else:
         raise UnsupportedFactorType(str(factor_type))
-
-
-def make_desirability_function(response):
-    """ Define a Derringer and Suich desirability function.
-
-    :param dict response_dict: Response variable config dictionary.
-    :return: desirability function.
-    :rtype: Callable
-    """
-    s = response.get('priority', 1)
-    if response['criterion'] == 'target':
-        L = response['low_limit']
-        U = response['high_limit']
-        T = response.get('target', (U + L) / 2)
-
-        def desirability(y):
-            if y < L or U < y:
-                return 0
-            elif L <= y <= T:
-                return ((y - L) / (T - L)) ** s
-            elif T <= y <= U:
-                return ((y - U) / (T - U)) ** s
-
-    elif response['criterion'] == 'maximize':
-        L = response['low_limit']
-        T = response['target']
-
-        def desirability(y):
-            if y < L:
-                return 0
-            elif T < y:
-                return 1
-            else:
-                return ((y - L) / (T - L)) ** s
-
-    elif response['criterion'] == 'minimize':
-        U = response['high_limit']
-        T = response['target']
-
-        def desirability(y):
-            if y < T:
-                return 1
-            elif U < y:
-                return 0
-            else:
-                return ((y - U) / (T - U)) ** s
-
-    else:
-        raise ValueError(response['criterion'])
-
-    return desirability
-
-
-def predict_optimum(design_sheet, response, criterion, factors, degree=2):
-    """ Regress using `degree`-polynomial and optimize response.
-
-    :param pandas.DataFrame design_sheet: Factor settings.
-    :param pandas.Series response: Response Y-vector.
-    :param str criterion: 'maximize' | 'minimize'
-    :param int degree: Degree of polynomial to use for regression.
-    :return: Array with predicted optimum.
-    :rtype: numpy.ndarray[float]
-    :raises: OptimizationFailed
-    """
-    matrix_columns = design_sheet.columns
-    n_rows, n_cols = design_sheet.shape
-    products = OrderedDict()
-    combinations = [list(comb) for deg in range(1, degree + 1)
-                    for comb in combinations_with_replacement(range(n_cols), deg)]
-
-    # Multiply columns together.
-    for column_group in (matrix_columns[comb] for comb in combinations):
-        values = design_sheet[column_group].product(axis=1)
-        products['*'.join(column_group)] = values
-
-    extended_sheet = pd.DataFrame(products)
-
-    # Extend data-sheet with constants-column.
-    design_w_constants = np.hstack([np.ones((n_rows, 1)),
-                                    extended_sheet.values])
-
-    # Regress using least squares.
-    c_stacked = np.linalg.lstsq(design_w_constants, response.values)[0]
-    coefficients = c_stacked.flatten()
-    # Define optimization function for optimizer.
-    def predicted_response(x, invert=False):
-        # Make extended factor list from given X.
-        factor_list = [1] + [np.product(x[comb]) for comb in combinations]
-        factors = np.array(factor_list)
-
-        # Calculate response.
-        factor_contributions = np.multiply(factors, coefficients)
-        return (-1 if invert else 1) * factor_contributions.sum()
-
-    # Since factors are set according to design the optimum is already
-    # guessed to be at the center of the design. Hence, use medians as
-    # initial guess.
-    x0 = design_sheet.median(axis=0).values
-
-    # Set up bounds for optimization to keep it inside the allowed design space.
-    mins = [f.min if f.min != '-inf' else None for f in factors.values()]
-    maxes = [f.max if f.max != 'inf' else None for f in factors.values()]
-    bounds = list(zip(mins, maxes))
-
-    if criterion == 'maximize':
-        optimization_results = minimize(lambda x: predicted_response(x, True),
-                                        x0, method='L-BFGS-B', bounds=bounds)
-    elif criterion == 'minimize':
-        optimization_results = minimize(predicted_response, x0,
-                                        method='L-BFGS-B', bounds=bounds)
-
-    if not optimization_results['success']:
-        raise OptimizationFailed(optimization_results['message'])
-
-    return optimization_results['x']

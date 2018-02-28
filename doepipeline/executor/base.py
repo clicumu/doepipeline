@@ -113,9 +113,6 @@ class BasePipelineExecutor(object):
             if watch:
                 assert 'job_name' in kwargs,\
                     'if watch is True, job_name must be given'
-                assert isinstance(kwargs['job_name'], str)\
-                       or isinstance(kwargs['job_name'], Sequence),\
-                    'job_name must be str or Sequence'
         except AssertionError as e:
             raise ValueError(str(e))
 
@@ -191,7 +188,7 @@ class BasePipelineExecutor(object):
 
             experiment_index.append(job_name)
             logging.info('Creating directory: {}'.format(job_name))
-            self.make_dir(job_name)
+            self.make_dir(str(job_name))
 
             for job_name, script in zip(job_steps, scripts):
                 job_steps[job_name].append(script)
@@ -261,11 +258,11 @@ class BasePipelineExecutor(object):
         self.execute_command('mkdir {}'.format(dir), **kwargs)
 
     def _parse_results_file(self, experiment_index, pipeline_collection):
-        results = dict()
+        results = OrderedDict()
         for job_name in experiment_index:
             file_name = pipeline_collection['RESULTS_FILE']
             logging.info('Reads pipeline results from {}'.format(file_name))
-            contents = self.read_file_contents(file_name, directory=job_name)
+            contents = self.read_file_contents(file_name, directory=str(job_name))
             f_handle = StringIO(contents)
             current_results = pd.Series.from_csv(f_handle)
             results[job_name] = current_results

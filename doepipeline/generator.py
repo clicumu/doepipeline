@@ -1,7 +1,9 @@
-import yaml
 import re
 import collections
 import os
+
+import yaml
+import numpy as np
 
 from doepipeline.designer import ExperimentDesigner
 from doepipeline.utils import parse_job_to_template_string
@@ -86,8 +88,8 @@ class PipelineGenerator:
 
         Example output:
         pipeline_collection = {
-            '0': ['./script_one --param 1', './script_two --other-param 3'],
-            '1': ['./script_one --param 2', './script_two --other-param 4'],
+            0: ['./script_one --param 1', './script_two --other-param 3'],
+            1: ['./script_one --param 2', './script_two --other-param 4'],
             ...
         }
 
@@ -105,9 +107,9 @@ class PipelineGenerator:
 
         for i, experiment in experiment_design.iterrows():
             if exp_id_column is not None:
-                exp_id = str(experiment[exp_id_column])
+                exp_id = experiment[exp_id_column]
             else:
-                exp_id = str(i)
+                exp_id = i
 
             rendered_scripts = list()
 
@@ -215,6 +217,36 @@ def _validate_response_config(design_responses):
     assert all(
         isinstance(target, dict) for target in design_responses.values()), \
         'design responses optimization goal must be key-value mappings'
+    has_multiple = len(design_responses) > 1
+    for name, response_spec in design_responses.items():
+        assert 'criterion' in response_spec, 'response {} have not specified ' \
+                                             '"criterion".'.format(name)
+        criterion = response_spec['criterion']
+        assert criterion in ('maximize', 'minimize', 'target'), \
+            'response {} has invalid criterion {} (valid options "maximize", ' \
+            '"minimize", "target")'.format(name, criterion)
+
+        if has_multiple:
+            if criterion == 'target':
+                required_terms = ('low_limit', 'high_limit', 'target')
+            elif criterion == 'maximize':
+                required_terms = ('low_limit', 'target')
+            else:
+                required_terms = ('high_limit', 'target')
+
+            for required in required_terms:
+                assert required in response_spec, \
+                    'response {} is missing "{}" which is required for responses ' \
+                    'with criterion "{}" when multiple responses are used'.format(
+                        name, criterion, required)
+                assert isinstance(response_spec[required], (np.number, int, float)), \
+                    '{} for response {} is not numeric.'.format(name, required)
+
+        if 'transform' in response_spec:
+            transform = response_spec['transform']
+            assert transform in ('log', 'box-cox'), \
+                'response {} has invalid transform {} (valid options "log", ' \
+                '"box-cox").'.format(name, transform)
 
 def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
                             config_dict, design_factors, job_names):

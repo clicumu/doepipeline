@@ -14,6 +14,7 @@ from doepipeline.executor import LocalPipelineExecutor
 class BaseRunTestCase(unittest.TestCase):
 
     executor = LocalPipelineExecutor
+    full_formula = '_response~FactorA*FactorB + I(FactorA**2) + I(FactorB**2)'
 
     def setUp(self):
         os.chdir(os.path.dirname(__file__))
@@ -46,7 +47,8 @@ class TestLocalSerialRun(BaseRunTestCase):
     def test_run_optimum_within_bounds(self):
         generator = PipelineGenerator(self.config_with_optimum(15, 3))
 
-        designer = generator.new_designer_from_config()
+        designer = generator.new_designer_from_config(model_selection='manual',
+                                                      manual_formula=self.full_formula)
         design = designer.new_design()
         pipeline = generator.new_pipeline_collection(design)
 
@@ -64,7 +66,8 @@ class TestLocalSerialRun(BaseRunTestCase):
     def test_run_optimum_outside_bounds(self):
         generator = PipelineGenerator(self.config_with_optimum(5, 5))
 
-        designer = generator.new_designer_from_config()
+        designer = generator.new_designer_from_config(model_selection='manual',
+                                                      manual_formula=self.full_formula)
         design = designer.new_design()
         pipeline = generator.new_pipeline_collection(design)
 
@@ -95,7 +98,9 @@ class TestLocalSerialScreeningRun(BaseRunTestCase):
 
     def test_screening_finds_optimum_at_origin(self):
         generator = PipelineGenerator(self.config_with_optimum(0, 0))
-        designer = generator.new_designer_from_config(skip_screening=False)
+        designer = generator.new_designer_from_config(skip_screening=False,
+                                                      model_selection='manual',
+                                                      manual_formula=self.full_formula)
         design = designer.new_design()
         pipeline = generator.new_pipeline_collection(design)
 
@@ -114,7 +119,9 @@ class TestLocalSerialScreeningRun(BaseRunTestCase):
 
     def test_optimization_founds_optimum_after_screening(self):
         generator = PipelineGenerator(self.config_with_optimum(15, 3))
-        designer = generator.new_designer_from_config(skip_screening=False)
+        designer = generator.new_designer_from_config(skip_screening=False,
+                                                      model_selection='manual',
+                                                      manual_formula=self.full_formula)
         cmd = '{script}'
         executor = self.__class__.executor(workdir=self.work_dir,
                                            base_command=cmd)
