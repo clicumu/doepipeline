@@ -69,6 +69,12 @@ def make_parser():
                         help=('If this flag is set, not screening will be run '
                               'spanning all values from factor mins to factor '
                               'maxes.'))
+    parser.add_argument('--reevaluate_screening', action='store_true',
+                        help=('If this flag is set and high or low-limits '
+                              'for response(s) are set, the results from '
+                              'screening will be re-evaluated if algorithm '
+                              'converges at an optimum which does not '
+                              'fulfill the the requirements.'))
     parser.add_argument('--screening_reduction', default='auto',
                         type=reduction_argument,
                         help='Reduction factor for GSD-screening (default auto)')
@@ -147,8 +153,17 @@ if __name__ == '__main__':
         optimum = designer.update_factors_from_response(results, tol=args.tol)
 
         if optimum.converged:
-            logging.info(('Optimum reached after {} iterations. '
-                          'Saves output to {}.'.format(n_iter, args.output)))
+            logging.info('Convergence reached after {} iterations. '.format(n_iter))
+
+            if not optimum.reached_limits:
+                logging.warning('Response limits not reached.')
+                if not args.skip_screening and args.reevaluate_screening:
+                    logging.info(('Re-evaluate screening results to optimize '
+                                  'from next best screening results.'))
+                    designer.reevaluate_screening()
+                    continue
+
+            logging.info('Saves output to {}.'.format(n_iter, args.output))
             optimum.predicted_optimum.to_csv(args.output)
             break
 
