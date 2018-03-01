@@ -107,8 +107,14 @@ class CategoricalFactor:
 
     """ Multilevel categorical factors. """
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError
+    def __init__(self, values, fixed_value=None):
+        self.values = values
+        self.fixed_value = fixed_value
+
+    def __repr__(self):
+        return '{}(values={}, fixed_value={})'.format(self.__class__.__name__,
+                                                      self.values,
+                                                      self.fixed_value)
 
 
 class ExperimentDesigner:
@@ -143,13 +149,11 @@ class ExperimentDesigner:
 
         self.factors = OrderedDict()
         for factor_name, f_spec in factors.items():
-            has_neg = any([f_spec['high_init'] < 0, f_spec['low_init'] < 0])
-            f_min = f_spec.get('min', float('-inf') if has_neg else 0)
-            f_max = f_spec.get('max', float('inf'))
-            f_type = f_spec.get('type', 'quantitative')
-            factor = Factor(f_type, f_max, f_min)
-            factor.current_high = f_spec['high_init']
-            factor.current_low = f_spec['low_init']
+            factor = factor_from_spec(f_spec)
+            if isinstance(factor, CategoricalFactor) and skip_screening:
+                raise DesignerError('Can\'t perform optimization with categorical '
+                                    'variables without prior screening.')
+
             self.factors[factor_name] = factor
             logging.debug('Sets factor {}: {}'.format(factor_name, factor))
 
@@ -230,7 +234,8 @@ class ExperimentDesigner:
 
             if has_multiple_responses:
                 desirability_function = self._desirabilites[name]
-                response_values = desirability_function(response_values)
+                response_values = [desirability_function(value)
+                                   for value in response_values]
             response[name] = response_values
 
         if has_multiple_responses:
@@ -353,9 +358,9 @@ class ExperimentDesigner:
         response = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
-            optimum_i = response.argsort()[-use_index]
+            optimum_i = response.argsort().iloc[-use_index]
         elif criterion == 'minimize':
-            optimum_i = response.argsort()[use_index - 1]
+            optimum_i = response.argsort().iloc[use_index - 1]
         else:
             raise NotImplementedError
 
@@ -366,18 +371,23 @@ class ExperimentDesigner:
         # the current_high and current_low will be set to factors level above
         # and below the point in the screening design with the best response.
         for factor_level, (name, factor) in zip(optimum_design_row, factor_items):
-            factor_levels = sorted(self._design_sheet[name].unique())
+            if isinstance(factor, CategoricalFactor):
+                factor_levels = np.array(factor.values)
+                factor.fixed_value = factor_levels[factor_level]
+            else:
+                factor_levels = sorted(self._design_sheet[name].unique())
+
+                min_ = factor_levels[max([0, factor_level - 1])]
+                max_ = factor_levels[min([factor_level + 1, len(factor_levels) - 1])]
+
+                if isinstance(factor, OrdinalFactor):
+                    min_ = int(np.round(min_))
+                    max_ = int(np.round(max_))
+
+                factor.current_low = min_
+                factor.current_high = max_
+
             optimum_settings[name] = factor_levels[factor_level]
-
-            min_ = factor_levels[max([0, factor_level - 1])]
-            max_ = factor_levels[min([factor_level + 1, len(factor_levels)])]
-
-            if isinstance(factor, OrdinalFactor):
-                min_ = int(np.round(min_))
-                max_ = int(np.round(max_))
-
-            factor.current_low = min_
-            factor.current_high = max_
             logging.debug('New factor setting, {}: {}'.format(name, factor))
 
         results = OptimizationResult(
@@ -396,11 +406,13 @@ class ExperimentDesigner:
 
         levels = list()
         names = list()
+        dtypes = list()
         for name, factor in factor_items:
             names.append(name)
 
             if isinstance(factor, CategoricalFactor):
                 levels.append(factor.values)
+                dtypes.append(object)
                 continue
 
             num_levels = getattr(factor, 'screening_levels', 5)
@@ -415,17 +427,22 @@ class ExperimentDesigner:
 
             if isinstance(factor, OrdinalFactor):
                 values = sorted(np.unique(np.round(values)))
+                dtypes.append(int)
+            else:
+                dtypes.append(float)
 
             levels.append(values)
 
         design_matrix = pyDOE2.gsd([len(values) for values in levels],
                                    reduction if reduction is not 'auto' else len(levels))
-        factor_matrix = np.zeros_like(design_matrix)
-        for i, values in enumerate(levels):
-            factor_matrix[:, i] = np.array(values)[design_matrix[:, i]]
+        factor_matrix = list()
+        for i, (values, dtype) in enumerate(zip(levels, dtypes)):
+            values = np.array(values)[design_matrix[:, i]]
+            series = pd.Series(values, dtype=dtype)
+            factor_matrix.append(series)
 
         self._design_matrix = design_matrix
-        self._design_sheet = pd.DataFrame(factor_matrix, columns=names)
+        self._design_sheet = pd.concat(factor_matrix, axis=1, keys=names)
         return self._design_sheet
 
     def _new_optimization_design(self):
@@ -492,22 +509,29 @@ class ExperimentDesigner:
         return converged, reached_limits
 
 
-def Factor(factor_type, *args, **kwargs):
-    """ Factory function stratified by the factor_type parameter
+def factor_from_spec(f_spec):
+    """ Create factor from config factor specification.
 
-    :param str factor_type: The factor type (ordinal, quantitative, categorical).
+    :param dict f_spec: Factor specification from config-file.
     :returns: Function corresponding to `factor_type`.
     :rtype: QuantitativeFactor, OrdinalFactor, CategoricalFactor.
     :raises: UnsupportedFactorType
     """
-    if factor_type.lower() == "quantitative":
-        return QuantitativeFactor(*args, **kwargs)
-    elif factor_type.lower() == "ordinal":
-        return OrdinalFactor(*args, **kwargs)
-    elif factor_type.lower() == "categorical":
-        return CategoricalFactor(*args, **kwargs)
+    factor_type = f_spec.get('type', 'quantitative')
+    if factor_type == 'categorical':
+        return CategoricalFactor(f_spec['values'])
+    elif factor_type == 'quantitative':
+        factor_class = QuantitativeFactor
+    elif factor_type == 'ordinal':
+        factor_class = OrdinalFactor
     else:
         raise UnsupportedFactorType(str(factor_type))
+
+    has_neg = any([f_spec['high_init'] < 0, f_spec['low_init'] < 0])
+    f_min = f_spec.get('min', float('-inf') if has_neg else 0)
+    f_max = f_spec.get('max', float('inf'))
+
+    return factor_class(f_max, f_min, f_spec['low_init'], f_spec['high_init'])
 
 
 def _make_stored_boxcox(lambda_value):
