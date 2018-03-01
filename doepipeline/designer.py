@@ -447,18 +447,22 @@ class ExperimentDesigner:
 
     def _new_optimization_design(self):
         matrix_designer = self._matrix_designers[self.design_type.lower()]
-        self._design_matrix = matrix_designer(len(self.factors))
 
-        mins = np.array([f.min for f in self.factors.values()])
-        maxes = np.array([f.max for f in self.factors.values()])
-        span = np.array([f.span for f in self.factors.values()])
-        centers = np.array([f.center for f in self.factors.values()])
-        factor_matrix = self._design_matrix * (span / 2.0) + centers
+        numeric_factors = [(name, factor) for name, factor in self.factors.items()
+                           if isinstance(factor, NumericFactor)]
+        numeric_factor_names = [name for name, factor in numeric_factors]
+        design_matrix = matrix_designer(len(numeric_factors))
+
+        mins = np.array([f.min for _, f in numeric_factors])
+        maxes = np.array([f.max for _, f in numeric_factors])
+        span = np.array([f.span for _, f in numeric_factors])
+        centers = np.array([f.center for _, f in numeric_factors])
+        factor_matrix = design_matrix * (span / 2.0) + centers
 
         # Check if current settings are outside allowed design space.
         # Also, for factors that are specified as ordinal, adjust their values
         # in the design matrix to be rounded floats
-        for i, (factor_name, factor) in enumerate(self.factors.items()):
+        for i, (factor_name, factor) in enumerate(numeric_factors):
             if isinstance(factor, OrdinalFactor):
                 factor_matrix[:,i] = np.round(factor_matrix[:,i])
             logging.debug('Current setting {}: {}'.format(factor_name, factor))
@@ -476,7 +480,17 @@ class ExperimentDesigner:
             elif self._edge_action == 'shrink':
                 raise NotImplementedError
 
-        self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
+        factors = list()
+        for name, factor in self.factors.items():
+            if isinstance(factor, CategoricalFactor):
+                values = np.repeat(factor.fixed_value, len(design_matrix))
+                factors.append(pd.Series(values))
+            else:
+                i = numeric_factor_names.index(name)
+                dtype = int if isinstance(factor, OrdinalFactor) else float
+                factors.append(pd.Series(factor_matrix[:, i].astype(dtype)))
+
+        self._design_sheet = pd.concat(factors, axis=1, keys=self.factors.keys())
         return self._design_sheet
 
     def _check_convergence(self, centers, converged, criterion, prediction,
