@@ -10,7 +10,8 @@ from doepipeline.model_utils import make_desirability_function, predict_optimum
 
 
 class OptimizationResult(namedtuple(
-    'OptimizationResult', ['predicted_optimum', 'converged', 'tol'])):
+    'OptimizationResult', ['predicted_optimum', 'converged',
+                           'tol', 'reached_limits'])):
     """ `namedtuple` encapsulating results from optimization. """
 
 
@@ -19,6 +20,10 @@ class UnsupportedFactorType(Exception):
 
 
 class UnsupportedDesign(Exception):
+    pass
+
+
+class DesignerError(Exception):
     pass
 
 
@@ -155,6 +160,11 @@ class ExperimentDesigner:
         self.gsd_reduction = gsd_reduction
         self.model_selection = model_selection
         self.n_folds = n_folds
+
+        self._screening_criterion = None
+        self._screening_response = None
+        self._stored_transform = None
+        self._n_screening_evaluations = 0
         self._formula = manual_formula
         self._edge_action = at_edges
         self._phase = 'optimization' if self.skip_screening else 'screening'
@@ -209,10 +219,14 @@ class ExperimentDesigner:
             if transform == 'log':
                 logging.debug('Log-transforms response {}'.format(name))
                 response_values = np.log(response_values)
+                self._stored_transform = np.log
             elif transform == 'box-cox':
                 response_values, lambda_ = scipy.stats.boxcox(response_values)
                 logging.debug('Box-cox transformed response {} '
                               '(lambda={:.4f})'.format(name, lambda_))
+                self._stored_transform = _make_stored_boxcox(lambda_)
+            else:
+                self._stored_transform = lambda x: x
 
             if has_multiple_responses:
                 desirability_function = self._desirabilites[name]
@@ -229,21 +243,31 @@ class ExperimentDesigner:
             criterion = list(self.responses.values())[0]['criterion']
 
         if self._phase == 'screening':
+            self._screening_response = response
+            self._screening_criterion = criterion
             return self._evaluate_screening(response, criterion)
         else:
             return self._evaluate_optimization(response, tol, criterion)
+
+    def reevaluate_screening(self):
+        if self._screening_response is None:
+            raise DesignerError('screening must be run before re-evaluation')
+
+        return self._evaluate_screening(self._screening_response,
+                                        self._screening_criterion,
+                                        self._n_screening_evaluations + 1)
 
     def _evaluate_optimization(self, response, tol, criterion):
         # Find predicted optimal factor setting.
         logging.info('Finds optimal model')
 
-        optimal_x, model = predict_optimum(self._design_sheet,
-                                           response.iloc[:, 0].values,
-                                           self.factors,
-                                           criterion,
-                                           n_folds=self.n_folds,
-                                           model_selection=self.model_selection,
-                                           manual_formula=self._formula)
+        optimal_x, model, prediction = predict_optimum(self._design_sheet,
+                                                       response.iloc[:, 0].values,
+                                                       self.factors,
+                                                       criterion,
+                                                       n_folds=self.n_folds,
+                                                       model_selection=self.model_selection,
+                                                       manual_formula=self._formula)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
@@ -309,33 +333,29 @@ class ExperimentDesigner:
                 factor.current_high += step
                 logging.debug('Factor {} updated: {}'.format(name, factor))
 
-        # It's possible that the optimum is predicted to be at the edge of the allowed
-        # min or max factor setting. This will produce a high 'ratio' and the algorithm
-        # is not considered to have converged (above). However, in this situation we
-        # can't move the space any further and we should stop iterating.
-        new_centers =  np.array([f.center for f in self.factors.values()])
-        if (centers == new_centers).all():
-            logging.info('The design has not moved since last iteration. Converged.')
-            converged = True
+        converged, reached_limits = self._check_convergence(centers,
+                                                            converged,
+                                                            criterion,
+                                                            prediction,
+                                                            optimal_x)
 
-        results = OptimizationResult(
-            pd.Series(optimal_x, self._design_sheet.columns),
-            converged, tol
-        )
+        results = OptimizationResult(optimal_x, converged, tol, reached_limits)
 
         logging.info('Predicted optimum:\n{}'.format(
             results.predicted_optimum))
 
         return results
 
-    def _evaluate_screening(self, response, criterion):
+    def _evaluate_screening(self, response, criterion, use_index=1):
+        self._n_screening_evaluations += 1
+
         logging.info('Evaluates screening results.')
         response = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
-            optimum_i = int(response.argmax())
+            optimum_i = response.argsort()[-use_index]
         elif criterion == 'minimize':
-            optimum_i = int(response.argmin())
+            optimum_i = response.argsort()[use_index - 1]
         else:
             raise NotImplementedError
 
@@ -361,9 +381,10 @@ class ExperimentDesigner:
             logging.debug('New factor setting, {}: {}'.format(name, factor))
 
         results = OptimizationResult(
-            pd.Series(optimum_settings), converged=False, tol=0
+            pd.Series(optimum_settings), converged=False, tol=0,
+            reached_limits=False
         )
-        logging.info
+
         logging.info('Best screening result:\n{}'.format(
             results.predicted_optimum))
 
@@ -441,6 +462,35 @@ class ExperimentDesigner:
         self._design_sheet = pd.DataFrame(factor_matrix, columns=self.factors.keys())
         return self._design_sheet
 
+    def _check_convergence(self, centers, converged, criterion, prediction,
+                           optimal_x):
+        # It's possible that the optimum is predicted to be at the edge of the allowed
+        # min or max factor setting. This will produce a high 'ratio' and the algorithm
+        # is not considered to have converged (above). However, in this situation we
+        # can't move the space any further and we should stop iterating.
+        new_centers = np.array([f.center for f in self.factors.values()])
+        if (centers == new_centers).all():
+            logging.info(
+                'The design has not moved since last iteration. Converged.')
+            converged = True
+            reached_limits = True
+
+            if len(self.responses) > 1 and prediction < len(self.responses):
+                reached_limits = False
+            elif len(self.responses) == 1:
+                r_spec = list(self.responses.values())[0]
+                low_limit = self._stored_transform(r_spec.get('low_limit', 1))
+                high_limit = self._stored_transform(r_spec.get('high_limit', 1))
+                if criterion == 'maximize' and 'low_limit' in r_spec:
+                    reached_limits = prediction >= low_limit
+                elif criterion == 'minimize' and 'high_limit' in r_spec:
+                    reached_limits = prediction <= high_limit
+                elif criterion == 'target' and 'low_limit' in r_spec and 'high_limit' in r_spec:
+                    reached_limits = low_limit <= prediction <= high_limit
+        else:
+            reached_limits = False
+        return converged, reached_limits
+
 
 def Factor(factor_type, *args, **kwargs):
     """ Factory function stratified by the factor_type parameter
@@ -458,3 +508,9 @@ def Factor(factor_type, *args, **kwargs):
         return CategoricalFactor(*args, **kwargs)
     else:
         raise UnsupportedFactorType(str(factor_type))
+
+
+def _make_stored_boxcox(lambda_value):
+    def boxcox_transform(x):
+        return scipy.stats.boxcox(x, lambda_value)
+    return boxcox_transform
