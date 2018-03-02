@@ -62,8 +62,8 @@ def make_desirability_function(response):
     return desirability
 
 
-def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwargs):
-    data_sheet = data_sheet.copy()
+def predict_optimum(data_sheet, response, factor_names, criterion='minimize', **kwargs):
+
     means = data_sheet.mean(axis=0)
     stds = data_sheet.std(axis=0)
     data_sheet = (data_sheet - means) / stds
@@ -93,7 +93,6 @@ def predict_optimum(data_sheet, response, factors, criterion='minimize', **kwarg
     logging.debug(str(model.summary()))
 
     logging.info('Finds optimum of current design.')
-    factor_names = [name for name in factors.keys()]
     
     # Define optimization function for optimizer.
     def predicted_response(x, invert=False):

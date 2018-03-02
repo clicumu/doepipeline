@@ -148,6 +148,7 @@ class ExperimentDesigner:
             raise ValueError(str(e))
 
         self.factors = OrderedDict()
+        factor_types = list()
         for factor_name, f_spec in factors.items():
             factor = factor_from_spec(f_spec)
             if isinstance(factor, CategoricalFactor) and skip_screening:
@@ -157,6 +158,8 @@ class ExperimentDesigner:
             self.factors[factor_name] = factor
             logging.debug('Sets factor {}: {}'.format(factor_name, factor))
 
+            factor_types.append(f_spec.get('type', 'continuous'))
+
         self.skip_screening = skip_screening
         self.step_length = relative_step
         self.design_type = design_type
@@ -165,6 +168,7 @@ class ExperimentDesigner:
         self.model_selection = model_selection
         self.n_folds = n_folds
 
+        self._factor_types = factor_types
         self._screening_criterion = None
         self._screening_response = None
         self._stored_transform = None
@@ -266,18 +270,22 @@ class ExperimentDesigner:
         # Find predicted optimal factor setting.
         logging.info('Finds optimal model')
 
-        optimal_x, model, prediction = predict_optimum(self._design_sheet,
+        are_numeric = np.array(self._factor_types) != 'categorical'
+        numeric_names = np.array(list(self.factors.keys()))[are_numeric]
+        numeric_factors = np.array(list(self.factors.values()))[are_numeric]
+
+        optimal_x, model, prediction = predict_optimum(self._design_sheet.loc[:, are_numeric],
                                                        response.iloc[:, 0].values,
-                                                       self.factors,
-                                                       criterion,
+                                                       numeric_names,
+                                                       criterion=criterion,
                                                        n_folds=self.n_folds,
                                                        model_selection=self.model_selection,
                                                        manual_formula=self._formula)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        centers = np.array([f.center for f in self.factors.values()])
-        spans = np.array([f.span for f in self.factors.values()])
+        centers = np.array([f.center for f in numeric_factors])
+        spans = np.array([f.span for f in numeric_factors])
 
         ratios = (optimal_x - centers) / spans
         logging.debug(
@@ -292,7 +300,7 @@ class ExperimentDesigner:
             converged = False
             logging.info('Convergence not reached. Moves design.')
 
-            for ratio, (name, factor) in zip(ratios, self.factors.items()):
+            for ratio, name, factor in zip(ratios, numeric_names, numeric_factors):
                 if abs(ratio) < tol:
                     logging.debug(('Factor {} not updated - within tolerance '
                                    'limits.').format(name))
@@ -303,48 +311,23 @@ class ExperimentDesigner:
                                    'in optimal model.').format(name))
                     continue
 
-                logging.debug('Updates factor {}: {}'.format(name, factor))
-                step_length = self.step_length if self.step_length is not None \
-                    else abs(ratio)
-                if isinstance(factor, QuantitativeFactor):
-                    step = factor.span * step_length * np.sign(ratio)
-                elif isinstance(factor, OrdinalFactor):
-                    step = np.round(factor.span * step_length) * np.sign(ratio)
-                else:
-                    raise NotImplementedError
-
-                # If the proposed step change takes us below or above min and max:
-                if factor.current_low + step < factor.min:
-                    nudge = abs(factor.current_low + step - factor.min)
-                    logging.debug(
-                        'Factor {}: minimum allowed setting ({}) would be exceeded '
-                        '({}) by the proposed step change.'
-                        .format(name, factor.min, factor.current_low + step))
-                    step += nudge
-                    logging.debug(
-                        'Adjusting step by {}, new step is {}.'.format(nudge, step))
-
-                elif factor.current_high + step > factor.max:
-                    nudge = abs(factor.current_high + step - factor.max)
-                    logging.debug(
-                        'Factor {}: maximum allowed setting ({}) would be exceeded '
-                        '({}) by the proposed step change.'
-                        .format(name, factor.max, factor.current_high + step))
-                    step -= nudge
-                    logging.debug(
-                        'Adjusting step by -{}, new step is {}.'.format(nudge, step))
-
-                factor.current_low += step
-                factor.current_high += step
-                logging.debug('Factor {} updated: {}'.format(name, factor))
+                self._update_numeric_factor(factor, name, ratio)
 
         converged, reached_limits = self._check_convergence(centers,
                                                             converged,
                                                             criterion,
                                                             prediction,
-                                                            optimal_x)
+                                                            numeric_factors)
 
-        results = OptimizationResult(optimal_x, converged, tol, reached_limits)
+        optimization_results = pd.Series(index=self._design_sheet.columns,
+                                         dtype=object)
+        for name, factor in self.factors.items():
+            if isinstance(factor, CategoricalFactor):
+                optimization_results[name] = factor.fixed_value
+            else:
+                optimization_results[name] = optimal_x[name]
+        results = OptimizationResult(optimization_results, converged,
+                                     tol, reached_limits)
 
         logging.info('Predicted optimum:\n{}'.format(
             results.predicted_optimum))
@@ -400,6 +383,41 @@ class ExperimentDesigner:
 
         self._phase = 'optimization'
         return results
+
+    def _update_numeric_factor(self, factor, name, ratio):
+        logging.debug('Updates factor {}: {}'.format(name, factor))
+        step_length = self.step_length if self.step_length is not None \
+            else abs(ratio)
+        if isinstance(factor, QuantitativeFactor):
+            step = factor.span * step_length * np.sign(ratio)
+        elif isinstance(factor, OrdinalFactor):
+            step = np.round(factor.span * step_length) * np.sign(ratio)
+        else:
+            raise NotImplementedError
+
+        # If the proposed step change takes us below or above min and max:
+        if factor.current_low + step < factor.min:
+            nudge = abs(factor.current_low + step - factor.min)
+            logging.debug(
+                'Factor {}: minimum allowed setting ({}) would be exceeded '
+                '({}) by the proposed step change.'
+                    .format(name, factor.min, factor.current_low + step))
+            step += nudge
+            logging.debug(
+                'Adjusting step by {}, new step is {}.'.format(nudge, step))
+
+        elif factor.current_high + step > factor.max:
+            nudge = abs(factor.current_high + step - factor.max)
+            logging.debug(
+                'Factor {}: maximum allowed setting ({}) would be exceeded '
+                '({}) by the proposed step change.'
+                    .format(name, factor.max, factor.current_high + step))
+            step -= nudge
+            logging.debug(
+                'Adjusting step by -{}, new step is {}.'.format(nudge, step))
+        factor.current_low += step
+        factor.current_high += step
+        logging.debug('Factor {} updated: {}'.format(name, factor))
 
     def _new_screening_design(self, reduction='auto'):
         factor_items = sorted(self.factors.items())
@@ -494,12 +512,13 @@ class ExperimentDesigner:
         return self._design_sheet
 
     def _check_convergence(self, centers, converged, criterion, prediction,
-                           optimal_x):
+                           numeric_factors):
         # It's possible that the optimum is predicted to be at the edge of the allowed
         # min or max factor setting. This will produce a high 'ratio' and the algorithm
         # is not considered to have converged (above). However, in this situation we
         # can't move the space any further and we should stop iterating.
-        new_centers = np.array([f.center for f in self.factors.values()])
+
+        new_centers = np.array([f.center for f in numeric_factors])
         if (centers == new_centers).all():
             logging.info(
                 'The design has not moved since last iteration. Converged.')
