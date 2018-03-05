@@ -244,8 +244,9 @@ class ExperimentDesigner:
 
         if has_multiple_responses:
             logging.info(('Multiple response, combines using '
-                          'desirability functions'))
-            response = response.sum(axis=1).to_frame('combined_response')
+                          'geometric mean of desirability functions'))
+            response = np.power(response.product(axis=1), (1 / response.shape[1]))
+            response = response.to_frame('combined_response')
             criterion = 'maximize'
 
         else:
@@ -525,7 +526,7 @@ class ExperimentDesigner:
             converged = True
             reached_limits = True
 
-            if len(self.responses) > 1 and prediction < len(self.responses):
+            if len(self.responses) > 1 and prediction < 1:
                 reached_limits = False
             elif len(self.responses) == 1:
                 r_spec = list(self.responses.values())[0]
