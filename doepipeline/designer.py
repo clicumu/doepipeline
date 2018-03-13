@@ -335,7 +335,7 @@ class ExperimentDesigner:
             optimum_settings[name] = factor_levels[factor_level]
 
             min_ = factor_levels[max([0, factor_level - 1])]
-            max_ = factor_levels[min([factor_level + 1, len(factor_levels)])]
+            max_ = factor_levels[min([factor_level + 1, len(factor_levels) - 1])]
 
             if isinstance(factor, OrdinalFactor):
                 min_ = int(np.round(min_))
