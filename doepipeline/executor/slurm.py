@@ -11,7 +11,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
         except KeyError:
             TypeError("Missing key-word argument: 'slurm'")
 
-        slurm_command = 'sbatch -A {A} {flags} -J {{name}} {{script}}'
+        slurm_command = 'sbatch {script}'
 
         for (step_name, step), slurm_spec in zip(job_steps.items(), slurm['jobs']):
 
@@ -28,10 +28,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                         new_flag += ' {}'.format(value)
                     flags.append(new_flag)
 
-                # Preformat command-string with non-step specific info.
-                flag_str = ' '.join(flags)
-                command_step = slurm_command.format(A=slurm['account_name'],
-                                                   flags=flag_str)
+                command_step = slurm_command
             else:
                 command_step = 'nohup {script} > {name}.log 2>&1 & echo $!'
 
@@ -42,13 +39,16 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     # Create SLURM-compatible batch-script file
                     # with current command.
                     batch_file = '{name}.sh'.format(name=job_name)
-                    file_script = 'echo "#!/bin/sh\n{cmd}\n" > {name}.sh'.format(
-                        cmd=script, name=job_name
+                    flag_lines = '\n'.join('#SBATCH {f}'.format(f=flag)
+                                           for flag in flags)
+
+                    file_script = 'echo "#!/bin/sh\n{flags}\n{cmd}\n" > {batch_file}'.format(
+                        cmd=script, batch_file=batch_file, flags=flag_lines
                     )
+                    self.touch_file(batch_file)
                     self.execute_command(file_script, job_name=exp_name)
 
-                    command = command_step.format(name=job_name,
-                                                  script=batch_file)
+                    command = command_step.format(script=batch_file)
 
                     # A little ugly work-around. Other executors watch the PID
                     # of the running process when executed with watch-keyword.

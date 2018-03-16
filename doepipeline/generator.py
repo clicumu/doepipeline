@@ -145,10 +145,12 @@ class PipelineGenerator:
         if self._setting_up:
             self._setting_up = False
 
-        if 'SLURM' in self._config:
-            slurm = self._config['SLURM']
-            slurm['jobs'] = list()
-            for job in (self._config[name] for name in self._config['pipeline']):
+        jobs = [self._config[name] for name in self._config['pipeline']]
+
+        if any('SLURM' in job for job in jobs):
+            slurm = {'jobs': list()}
+
+            for job in jobs:
                 slurm['jobs'].append(job.get('SLURM', None))
 
             pipeline_collection['SLURM'] = slurm
@@ -164,7 +166,7 @@ class PipelineGenerator:
         :raises: AssertionError
         """
         reserved_terms = ('before_run', 'pipeline', 'design', 'constants',
-                          'results_file', 'working_directory', 'SLURM')
+                          'results_file', 'working_directory')
         valid_before = 'environment_variables', 'scripts'
 
         assert 'pipeline' in config_dict, 'pipeline missing'
@@ -198,8 +200,10 @@ class PipelineGenerator:
         _validate_factor_config(jobs, design_factors)
         _validate_response_config(design_responses)
 
-        if 'SLURM' in config_dict:
-            _validate_slurm_config(config_dict, jobs)
+        # SLURM-specifics.
+        for job in (j for j in jobs if 'SLURM' in j):
+            assert isinstance(job['SLURM'], dict), \
+                'SLURM-config must be mapping.'
 
 
 def _validate_constants(config_dict):
@@ -331,22 +335,3 @@ def _validate_setup_scrip_config(config_dict, valid_before):
                        in before['environment_variables'].values()), \
                 'environment_variables values must be strings'
 
-
-def _validate_slurm_config(config_dict, jobs):
-    # Check SLURM-specifics.
-    assert (any(
-        'SLURM' in job.keys() for job in jobs) and 'SLURM' in config_dict), \
-        'job specified with SLURM but SLURM project-name is missing'
-    if 'SLURM' in config_dict:
-        assert 'account_name' in config_dict['SLURM'], \
-            'SLURM account name required'
-
-        for job in (j for j in jobs if 'SLURM' in j):
-            assert 'SLURM' in job, \
-                'All jobs must have SLURM-settings specified'
-            assert 'p' in job['SLURM'] and job['SLURM']['p'], \
-                'job type must be set (-p)'
-            assert 'n' in job['SLURM'] and job['SLURM']['n'], \
-                'job cores/nodes must be set (-n)'
-            assert 't' in job['SLURM'] and job['SLURM']['t'], \
-                'job time must be set (-t)'
