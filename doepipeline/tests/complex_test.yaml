@@ -6,6 +6,7 @@ design:
             max: 40
             low_init: 10
             high_init: 20
+            screening_levels: 7
         FactorB:
             type: ordinal
             low_init: 1
@@ -24,6 +25,7 @@ design:
             criterion: maximize
             target: 2
             low_limit: 1
+    screening_reduction: 5
 
 results_file: complex_results.txt
 

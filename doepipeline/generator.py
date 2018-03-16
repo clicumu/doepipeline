@@ -75,8 +75,10 @@ class PipelineGenerator:
         factors = self._config['design']['factors']
         design_type = self._config['design']['type']
         responses = self._config['design']['responses']
+        reduction = self._config['design'].get('screening_reduction', 'auto')
 
-        return designer_class(factors, design_type, responses, *args, **kwargs)
+        return designer_class(factors, design_type, responses, *args,
+                              gsd_reduction=reduction, **kwargs)
 
     def new_pipeline_collection(self, experiment_design, exp_id_column=None):
         """ Given experiment, create script-strings to execute.
@@ -173,25 +175,31 @@ class PipelineGenerator:
         _validate_constants(config_dict)
 
         job_names = config_dict['pipeline']
+        jobs = [config_dict[job_name] for job_name in job_names]
+
         _validate_job_list_config(config_dict, job_names, reserved_terms)
         _validate_setup_scrip_config(config_dict, valid_before)
 
         design = config_dict['design']
-        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type', 'values'
-        allowed_factor_types = 'quantitative', 'ordinal', 'categorical'
+
         assert 'type' in design, 'design type is missing'
         assert 'factors' in design, 'design factors is missing'
         assert 'responses' in design, 'design responses is missing'
+
+        if 'screening_reduction' in design:
+            reduction = design['screening_reduction']
+            assert reduction == 'auto' or \
+                   (isinstance(reduction, int) and reduction > 1), \
+                'screening_reduction must be "auto" or integer larger than 1.'
+
         design_factors = design['factors']
         design_responses = design['responses']
 
-        _validate_factor_config(allowed_factor_keys,
-                                allowed_factor_types,
-                                config_dict,
-                                design_factors,
-                                job_names)
-
+        _validate_factor_config(jobs, design_factors)
         _validate_response_config(design_responses)
+
+        if 'SLURM' in config_dict:
+            _validate_slurm_config(config_dict, jobs)
 
 
 def _validate_constants(config_dict):
@@ -249,8 +257,12 @@ def _validate_response_config(design_responses):
                 '"box-cox").'.format(name, transform)
 
 
-def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
-                            config_dict, design_factors, job_names):
+def _validate_factor_config(jobs, design_factors):
+    allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', \
+                          'type', 'values', 'screening_levels'
+
+    allowed_factor_types = 'quantitative', 'ordinal', 'categorical'
+
     # Check that factors are specified.
     for key, factor_settings in design_factors.items():
         assert all(key in allowed_factor_keys for key in factor_settings), \
@@ -260,12 +272,21 @@ def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
             assert factor_settings['type'].lower() in allowed_factor_types, \
                 '"type" must be one of {}, error in factor {}'.format(
                     allowed_factor_types, key)
-    jobs = [config_dict[job_name] for job_name in job_names]
+
+        if 'screening_levels' in factor_settings:
+            factor_type = factor_settings.get('type', 'continuous').lower()
+            assert factor_type != 'categorical', \
+                'screening_levels can\'t be set for categorical factors'
+            levels = factor_settings['screening_levels']
+            assert isinstance(levels, int) and levels > 1, \
+                'screening_levels must be integer larger than 1.'
+
     # Check existence of scripts and that they are simple strings.
     assert all('script' in job for job in jobs), 'all jobs must have script'
     assert all(isinstance(job['script'], str) for job in jobs), \
         'job scripts must be strings'
     job_w_factors = [job for job in jobs if 'factors' in job]
+
     # Check factors are dicts.
     assert all(
         all(isinstance(factor, dict) for factor in job['factors'].values()) \
@@ -289,9 +310,6 @@ def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
         assert all(re.search(r'{%\s*' + fac + r'\s*%}', job['script']) \
                    for fac, fac_d in job['factors'].items() \
                    if fac_d.get('substitute', False)), msg
-
-    if 'SLURM' in config_dict:
-        _validate_slurm_config(config_dict, jobs)
 
 
 def _validate_setup_scrip_config(config_dict, valid_before):
