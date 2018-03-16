@@ -167,7 +167,7 @@ class PipelineGenerator:
 
         assert 'pipeline' in config_dict, 'pipeline missing'
         assert 'design' in config_dict, 'design missing'
-        assert 'results_file', 'collect_results missing'
+        assert 'results_file', 'results_file missing'
         assert 'working_directory' in config_dict, 'working directory missing'
 
         _validate_constants(config_dict)
@@ -177,7 +177,7 @@ class PipelineGenerator:
         _validate_setup_scrip_config(config_dict, valid_before)
 
         design = config_dict['design']
-        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type', 'numeric_type'
+        allowed_factor_keys = 'min', 'max', 'low_init', 'high_init', 'type', 'values'
         allowed_factor_types = 'quantitative', 'ordinal', 'categorical'
         assert 'type' in design, 'design type is missing'
         assert 'factors' in design, 'design factors is missing'
@@ -238,7 +238,7 @@ def _validate_response_config(design_responses):
                 assert required in response_spec, \
                     'response {} is missing "{}" which is required for responses ' \
                     'with criterion "{}" when multiple responses are used'.format(
-                        name, criterion, required)
+                        name, required, criterion)
                 assert isinstance(response_spec[required], (np.number, int, float)), \
                     '{} for response {} is not numeric.'.format(name, required)
 
@@ -248,13 +248,14 @@ def _validate_response_config(design_responses):
                 'response {} has invalid transform {} (valid options "log", ' \
                 '"box-cox").'.format(name, transform)
 
+
 def _validate_factor_config(allowed_factor_keys, allowed_factor_types,
                             config_dict, design_factors, job_names):
     # Check that factors are specified.
     for key, factor_settings in design_factors.items():
         assert all(key in allowed_factor_keys for key in factor_settings), \
-            'invalid key, allowed keys for factors: {}'.format(
-                allowed_factor_keys)
+            'invalid key in {}, allowed keys for factors: {}'.format(
+                key, allowed_factor_keys)
         if 'type' in factor_settings:
             assert factor_settings['type'].lower() in allowed_factor_types, \
                 '"type" must be one of {}, error in factor {}'.format(
@@ -311,7 +312,6 @@ def _validate_setup_scrip_config(config_dict, valid_before):
             assert all(isinstance(value, str) for value \
                        in before['environment_variables'].values()), \
                 'environment_variables values must be strings'
-
 
 
 def _validate_slurm_config(config_dict, jobs):

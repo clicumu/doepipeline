@@ -15,14 +15,15 @@ class BaseRunTestCase(unittest.TestCase):
 
     executor = LocalPipelineExecutor
     full_formula = '_response~FactorA*FactorB + I(FactorA**2) + I(FactorB**2)'
-
+    config_file = 'simple_test.yaml'
+    
     def setUp(self):
         os.chdir(os.path.dirname(__file__))
         self.work_dir = os.path.join(os.getcwd(), 'work_dir')
-        with open('simple_test.yaml') as f:
+        with open(self.__class__.config_file) as f:
             self.config = yaml.load(f)
             self.config['working_directory'] = self.work_dir
-
+            self.config['constants'] = {'ROOT': os.getcwd()}
         try:
             os.mkdir(self.work_dir)
         except FileExistsError:
@@ -34,11 +35,7 @@ class BaseRunTestCase(unittest.TestCase):
 
     def config_with_optimum(self, x, y):
         config = self.config.copy()
-        config['constants'] = {'ROOT': os.getcwd()}
-        script = 'python {% ROOT make_output.py %}'
-        script += ' -x %d -y %d' %(x, y)
-        script += ' step_one.txt step_two.txt -o {% results_file %}'
-        config['MyThirdJob']['script'] = script
+        config['MyThirdJob']['script'] += ' -x %d -y %d' %(x, y)
         return config
 
 
@@ -79,7 +76,11 @@ class TestLocalSerialRun(BaseRunTestCase):
         expected_optimum = {'FactorA': 5, 'FactorB': 5}
         self.assertFalse(optimum.converged)
         for factor in design.columns:
-            self.assertTrue(np.isclose(optimum.predicted_optimum[factor],
+            # Optimum is outside of bounds and optimization should be
+            # constrained to be inside design space. So the expected
+            # optimum should not have been predicted after a single
+            # iteration.
+            self.assertFalse(np.isclose(optimum.predicted_optimum[factor],
                                        expected_optimum[factor]))
 
 
@@ -143,3 +144,10 @@ class TestLocalParallelScreeningRun(TestLocalSerialScreeningRun):
     executor = lambda *a, **kw: LocalPipelineExecutor(*a, run_serial=False,
                                                       poll_interval=1, **kw)
 
+
+class TestComplexPipelineRun(TestLocalSerialScreeningRun):
+    
+    config_file = 'complex_test.yaml'
+    
+    def test_optimization_founds_optimum_after_screening(self):
+        super(TestComplexPipelineRun, self).test_optimization_founds_optimum_after_screening()

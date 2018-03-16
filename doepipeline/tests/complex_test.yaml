@@ -7,13 +7,25 @@ design:
             low_init: 10
             high_init: 20
         FactorB:
+            type: ordinal
             low_init: 1
             high_init: 4
+        FactorC:
+            type: categorical
+            values:
+              - A
+              - B
     responses:
         ResponseA:
             criterion: minimize
+            target: 2
+            high_limit: 4
+        ResponseB:
+            criterion: maximize
+            target: 2
+            low_limit: 1
 
-results_file: my_results.txt
+results_file: complex_results.txt
 
 pipeline:
     - MyFirstJob
@@ -35,4 +47,7 @@ MySecondJob:
             substitute: true
 
 MyThirdJob:  # ROOT is defined dynamically in test suit.
-    script: python {% ROOT make_output.py %} step_one.txt step_two.txt -o {% results_file %}
+    script: python {% ROOT make_complex_output.py %} step_one.txt step_two.txt {% FactorC %} -o {% results_file %}
+    factors:
+        FactorC:
+            substitute: true

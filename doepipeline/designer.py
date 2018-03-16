@@ -232,10 +232,10 @@ class ExperimentDesigner:
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
-        centers = np.array([f.center for f in self.factors.values()])
+        old_centers = np.array([f.center for f in self.factors.values()])
         spans = np.array([f.span for f in self.factors.values()])
 
-        ratios = (optimal_x - centers) / spans
+        ratios = (optimal_x - old_centers) / spans
         logging.debug(
             'The distance of the factor optimas from the factor centers, ' 
             'expressed as the ratio of the step length:\n{}'.format(ratios)
@@ -299,7 +299,7 @@ class ExperimentDesigner:
         # is not considered to have converged (above). However, in this situation we
         # can't move the space any further and we should stop iterating.
         new_centers =  np.array([f.center for f in self.factors.values()])
-        if (centers == new_centers).all():
+        if (old_centers == new_centers).all():
             logging.info('The design has not moved since last iteration. Converged.')
             converged = True
 
