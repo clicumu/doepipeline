@@ -45,6 +45,7 @@ class NumericFactor:
         self.current_high = current_high
         self.max = factor_max
         self.min = factor_min
+        self.screening_levels = 5
 
     @property
     def span(self):
@@ -430,7 +431,7 @@ class ExperimentDesigner:
                 dtypes.append(object)
                 continue
 
-            num_levels = getattr(factor, 'screening_levels', 5)
+            num_levels = factor.screening_levels
             spacing = getattr(factor, 'screening_spacing', 'linear')
             min_ = factor.min
             max_ = factor.max
@@ -550,6 +551,7 @@ def factor_from_spec(f_spec):
     factor_type = f_spec.get('type', 'quantitative')
     if factor_type == 'categorical':
         return CategoricalFactor(f_spec['values'])
+
     elif factor_type == 'quantitative':
         factor_class = QuantitativeFactor
     elif factor_type == 'ordinal':
@@ -561,7 +563,11 @@ def factor_from_spec(f_spec):
     f_min = f_spec.get('min', float('-inf') if has_neg else 0)
     f_max = f_spec.get('max', float('inf'))
 
-    return factor_class(f_max, f_min, f_spec['low_init'], f_spec['high_init'])
+    factor = factor_class(f_max, f_min, f_spec['low_init'], f_spec['high_init'])
+    if 'screening_levels' in f_spec:
+        factor.screening_levels = f_spec['screening_levels']
+
+    return factor
 
 
 def _make_stored_boxcox(lambda_value):

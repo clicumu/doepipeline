@@ -101,6 +101,7 @@ Specifies factors and responses to investigate as well as what design to use in 
     * `<factor-name>`: Keys are name used for factor and will be used for substitutions. Values are specified below.
 * `responses`: Required. Mapping of one or more response.
     * `<response-name>`: Keys are name used for response, values are specified below.
+* `screening_reduction`: Optional. `auto` (default) or positive integer. Specifies reduction factors used for GSD during screening. 
 
 ### `<factor-name>`
 Specification of each factor. Valid keys specifying factors are:
@@ -113,6 +114,7 @@ Specification of each factor. Valid keys specifying factors are:
 * `max`: Optional for numeric factors. Maximum allowed value, default is positive infinity.
 * `min`: Optional for numeric factors. Minimum allowed value, default is negative infinity.
 * `values`: Required for categorical factors. Possible values.
+* `screening_levels`: Optional for numeric factors. Number of levels investigated during screening phase. Default is 5.
 ### `<response-name>`
 Specification of a response. Valid keys specifying responses are:
 
