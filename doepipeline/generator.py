@@ -238,7 +238,7 @@ def _validate_response_config(design_responses):
                 assert required in response_spec, \
                     'response {} is missing "{}" which is required for responses ' \
                     'with criterion "{}" when multiple responses are used'.format(
-                        name, criterion, required)
+                        name, required, criterion)
                 assert isinstance(response_spec[required], (np.number, int, float)), \
                     '{} for response {} is not numeric.'.format(name, required)
 
