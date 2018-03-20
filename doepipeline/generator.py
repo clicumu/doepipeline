@@ -75,10 +75,7 @@ class PipelineGenerator:
         factors = self._config['design']['factors']
         design_type = self._config['design']['type']
         responses = self._config['design']['responses']
-        reduction = self._config['design'].get('screening_reduction', 'auto')
-
-        return designer_class(factors, design_type, responses, *args,
-                              gsd_reduction=reduction, **kwargs)
+        return designer_class(factors, design_type, responses, *args, **kwargs)
 
     def new_pipeline_collection(self, experiment_design, exp_id_column=None):
         """ Given experiment, create script-strings to execute.
