@@ -150,7 +150,6 @@ def stepwise_regression(data, response_column, k):
     for f_c in factor_combinations:
         q2 = crossvalidate_formula(formula_base + '+'.join(f_c), data, response_column, k)
         comb_q2.append((q2, f_c))
-
     best_q2, best_combination = sorted(comb_q2)[-1]
     higher_order = ['{}:{}'.format(fac, other_fac) for i, fac in enumerate(best_combination, start=1)
                     for other_fac in best_combination[i:]]
@@ -159,12 +158,14 @@ def stepwise_regression(data, response_column, k):
                      if is_quant and col in best_combination]
 
     while 'still_improving':
+        if not higher_order:
+            break
         term_results = list()
         for term in higher_order:
             terms = [term] + list(best_combination)
             q2 = crossvalidate_formula(formula_base + '+'.join(terms), data, response_column, k)
             term_results.append((q2, term))
-
+        
         current_best_q2, current_best_term = sorted(term_results)[-1]
 
         if current_best_q2 > best_q2:

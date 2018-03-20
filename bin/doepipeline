@@ -7,6 +7,7 @@ import argparse
 import os
 import sys
 import logging
+import pandas as pd
 
 from doepipeline.executor import LocalPipelineExecutor, SlurmPipelineExecutor
 from doepipeline.generator import PipelineGenerator
@@ -88,6 +89,11 @@ def make_parser():
                         help='log file (default: STDOUT)')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='if set, logging will be set to debug')
+    parser.add_argument('-m', '--model_selection_method', default='brute', 
+                        choices=['brute', 'greedy'], help='The method of selecting \
+                        the best model in each iteration. It\'s recommended to use \
+                        "-m greedy" when fitting a quadratic model and factors are \
+                        more than 3 because of the steep running time increase.')
 
     return parser
 
@@ -115,7 +121,9 @@ if __name__ == '__main__':
 
     logging.info('Initialize designer.')
     designer = generator.new_designer_from_config(
-        skip_screening=args.skip_screening, gsd_reduction=args.screening_reduction)
+        skip_screening=args.skip_screening,
+        gsd_reduction=args.screening_reduction,
+        model_selection=args.model_selection_method)
 
     if args.execution == 'slurm':
         executor_class = SlurmPipelineExecutor
@@ -148,6 +156,15 @@ if __name__ == '__main__':
 
         logging.info('Start execution of pipeline.')
         results = executor.run_pipeline_collection(pipeline)
+
+        exp_sheet_complete = pd.concat([design, results], axis=1)
+        exp_sheet_complete.index.name = 'Exp'
+        exp_sheet_outfile = os.path.join(
+            pipeline['WORKDIR'],
+            'complete_experimental_sheet_iter_{0}.csv'.format(n_iter))
+        logging.info('The design sheet with results:\n{}'.format(exp_sheet_complete))
+        logging.info('Saving the design sheet and result in {}'.format(exp_sheet_outfile))
+        exp_sheet_complete.to_csv(exp_sheet_outfile)
 
         logging.info('Execution iteration {} finished, finding optimum'.format(n_iter))
         optimum = designer.update_factors_from_response(results, tol=args.tol)
