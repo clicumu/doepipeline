@@ -44,7 +44,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             logging.info('All jobs finished.')
             return self.JOB_FINISHED, 'no jobs running.'
 
-    def execute_command(self, command, watch=False, wait=False, **kwargs):
+    def execute_command(self, command, watch=False, wait=False, check=True, **kwargs):
         """ Execute given command by executing it in subprocess.
 
         Calls are made using `subprocess`-module like::
@@ -74,11 +74,12 @@ class LocalPipelineExecutor(BasePipelineExecutor):
                     command,
                     shell=True,
                     stdout=subprocess.PIPE,
-                    check=True,
+                    stderr=subprocess.PIPE,
+                    check=check,
                     **kwargs)
                 return completed_process
             except subprocess.CalledProcessError as e:
-                logging.warning('Command failed: "{}"'.format(command))
+                logging.error('Command failed: "{}"'.format(command))
                 raise CommandError(str(e))
 
     def read_file_contents(self, file_name, directory=None, **kwargs):

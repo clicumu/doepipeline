@@ -30,7 +30,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
 
                 command_step = slurm_command
             else:
-                command_step = 'nohup {script} > {name}.log 2>&1 & echo $!'
+                command_step = 'nohup {script} 2>&1 & echo $!'
 
             for exp_name, script in zip(experiment_index, step):
                 current_workdir = os.path.join(self.workdir, str(exp_name))
@@ -71,7 +71,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                 else:
                     # Jobs not running at SLURM are simply executed and
                     # pids are stored.
-                    command = command_step.format(script=script, name=job_name)
+                    command = command_step.format(script=script)
                     completed_command = self.execute_command(
                         command,
                         job_name=exp_name,
@@ -147,10 +147,15 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
             if is_running_slurm:
                 cmd = 'sacct -X -j {id} -o {fields}'.format(
                     id=job_info['id'], fields=','.join(sacct_fields))
+                check_returncode = True
             else:
                 cmd = 'ps -a | grep {pid}'.format(pid=job_info['id'])
+                # Grep returns exit code 1 if it can't find any matches.
+                # Therefore, we should skip the error check in execute_command.
+                check_returncode = False
 
-            completed_command = self.execute_command(cmd)
+            completed_command = self.execute_command(
+                cmd, check=check_returncode)
             stdout = completed_command.stdout.decode(self.decoding)
             if is_running_slurm:
                 status_rows = stdout.strip().split('\n')
