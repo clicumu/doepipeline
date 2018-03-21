@@ -70,8 +70,14 @@ class LocalPipelineExecutor(BasePipelineExecutor):
         else:
             try:
                 # Note: This will wait until execution finished.
-                subprocess.call(command)
-            except OSError as e:
+                completed_process = subprocess.run(
+                    command,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    check=True,
+                    **kwargs)
+                return completed_process
+            except subprocess.CalledProcessError as e:
                 logging.warning('Command failed: "{}"'.format(command))
                 raise CommandError(str(e))
 
@@ -131,11 +137,6 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
             self.wait_until_current_jobs_are_finished()
             logging.info('Pipeline step finished: {}'.format(step))
-
-    def touch_file(self, file_name, times=None):
-        logging.debug('Creates file: {}'.format(file_name))
-        with open(file_name, 'a'):
-            os.utime(file_name, times=times)
 
     def make_dir(self, dir, **kwargs):
         logging.debug('Make directory: {} (kwargs {})'.format(dir, kwargs))

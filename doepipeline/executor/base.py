@@ -90,6 +90,7 @@ class BasePipelineExecutor(object):
         self.running_jobs = dict()
         self.has_workdir = False
         self.has_experiment_dirs = False
+        self.decoding = 'utf-8'
 
     @abc.abstractmethod
     def execute_command(self, command, watch=False, wait=False, **kwargs):
@@ -252,6 +253,7 @@ class BasePipelineExecutor(object):
             command = 'type NUL >> {file}'
         else:
             command = 'touch {file}'
+        logging.debug('Creates file: {}'.format(file_name))
         self.execute_command(command.format(file=file_name), **kwargs)
 
     def make_dir(self, dir, **kwargs):
