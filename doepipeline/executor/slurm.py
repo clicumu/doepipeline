@@ -1,4 +1,5 @@
 import logging
+import os
 
 from doepipeline.executor.local import LocalPipelineExecutor
 
@@ -14,7 +15,6 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
         slurm_command = 'sbatch {script}'
 
         for (step_name, step), slurm_spec in zip(job_steps.items(), slurm['jobs']):
-
             if slurm_spec is not None:
                 flag_specs = ((key, value) for key, value in slurm_spec.items())
                 flags = []
@@ -33,6 +33,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                 command_step = 'nohup {script} > {name}.log 2>&1 & echo $!'
 
             for exp_name, script in zip(experiment_index, step):
+                current_workdir = os.path.join(self.workdir, str(exp_name))
                 job_name = '{0}_exp_{1}'.format(step_name, exp_name)
 
                 if slurm_spec is not None:
@@ -42,11 +43,12 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     flag_lines = '\n'.join('#SBATCH {f}'.format(f=flag)
                                            for flag in flags)
 
-                    file_script = 'echo "#!/bin/sh\n{flags}\n{cmd}\n" > {batch_file}'.format(
+                    file_script = "echo '#!/bin/sh\n{flags}\n{cmd}\n' > {batch_file}".format(
                         cmd=script, batch_file=batch_file, flags=flag_lines
                     )
-                    self.touch_file(batch_file)
-                    self.execute_command(file_script, job_name=exp_name)
+
+                    self.touch_file(batch_file, cwd=current_workdir)
+                    self.execute_command(file_script, job_name=exp_name, cwd=current_workdir)
 
                     command = command_step.format(script=batch_file)
 
@@ -55,8 +57,13 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     # To avoid this behaviour the job-name provided to SLURM is
                     # saved but the command is executed without setting watch
                     # to True.
-                    _, stdout, _ = self.execute_command(command, job_name=exp_name)
-                    job_id = stdout.strip().split()[-1]
+                    completed_command = self.execute_command(
+                        command,
+                        job_name=exp_name,
+                        cwd=current_workdir)
+
+                    # Potential bug below: What encoding to use? Different between platforms?
+                    job_id = completed_command.stdout.strip().split()[-1].decode(self.decoding)
                     self.running_jobs[job_name] = {
                         'id': job_id, 'running_at_slurm': True
                     }
@@ -65,9 +72,14 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     # Jobs not running at SLURM are simply executed and
                     # pids are stored.
                     command = command_step.format(script=script, name=job_name)
-                    _, pid, _ = self.execute_command(command, job_name=exp_name)
+                    completed_command = self.execute_command(
+                        command,
+                        job_name=exp_name,
+                        cwd=current_workdir)
+                    job_id = completed_command.stdout.strip().decode(self.decoding)
                     self.running_jobs[job_name] = {
-                        'id': pid.strip(), 'running_at_slurm': False
+                        'id': job_id,
+                        'running_at_slurm': False
                     }
 
             self.wait_until_current_jobs_are_finished()
@@ -82,39 +94,100 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
         :return: status, message
         :rtype: str, str
         """
+        # See https://slurm.schedmd.com/squeue.html for job state codes
+        ok_job_status = (
+            "CONFIGURING",
+            "COMPLETING",
+            "PENDING",
+            "RUNNING",
+            "RESV_DEL_HOLD",
+            "REQUEUE_FED",
+            "REQUEUE_HOLD",
+            "REQUEUE",
+            "RESIZING",
+            "REVOKED",
+            "SUSPENDED",
+            "SPECIAL_EXIT",
+            "SIGNALING"
+        )
+        fail_job_status = (
+            "FAILED",
+            "BOOT_FAIL",
+            "CANCELLED",
+            "DEADLINE",
+            "FAILED",
+            "NODE_FAIL",
+            "OUT_OF_MEMORY",
+            "PREEMPTED",
+            "STOPPED",
+            "TIMEOUT"
+        )
+
+        # Specify the fields to request with sacct.
+        # Expand the 'State' field so we don't risk getting a truncated msg.
+        field_len = 30
+        sacct_fields = [
+            'JobID',
+            'JobName',
+            'Partition',
+            'Account',
+            'AllocCPUS',
+            'State%{}'.format(field_len),
+            'ExitCode'
+        ]
+
         jobs_still_running = list()
 
         # Copy jobs to allow mutation of self.running_jobs.
         current_jobs = [job for job in self.running_jobs.items()]
 
         for job_name, job_info in current_jobs:
-            logging.debug('Polls "{}"'.format(job_name))
+            logging.debug('Polling "{}"'.format(job_name))
             is_running_slurm = job_info['running_at_slurm']
             if is_running_slurm:
-                cmd = 'sacct -j {id}'.format(id=job_info['id'])
+                cmd = 'sacct -X -j {id} -o {fields}'.format(
+                    id=job_info['id'], fields=','.join(sacct_fields))
             else:
                 cmd = 'ps -a | grep {pid}'.format(pid=job_info['id'])
 
-            __, stdout, __ = self.execute_command(cmd)
-
+            completed_command = self.execute_command(cmd)
+            stdout = completed_command.stdout.decode(self.decoding)
             if is_running_slurm:
                 status_rows = stdout.strip().split('\n')
-                status_dict = dict(zip(status_rows[0].split()[-2:],
-                                       status_rows[-1].split()[-2:]))
+                status_dict = dict(zip(status_rows[0].split(),
+                                       status_rows[-1].split()))
+                state = status_dict['State']
 
-                if status_dict['State'] == 'FAILED':
-                    exit_code = status_dict['ExitCode']
-                    msg = '{0} has failed. (exit code {1})'.format(job_name,
-                                                                   exit_code)
-                    logging.error(msg)
-                    return self.JOB_FAILED, msg
-
-                if status_dict['State'] == 'COMPLETED':
+                if state == 'COMPLETED':
                     logging.info('{0} finished'.format(job_name))
                     self.running_jobs.pop(job_name)
 
-                else:
+                elif state in fail_job_status:
+                    # State of job is either terminated or failed.
+                    exit_code = status_dict['ExitCode']
+                    msg = '{} has terminated or failed. (exit code {})'.format(
+                        job_name,
+                        exit_code)
+                    logging.error(msg)
+                    logging.error('Output from "{}":\n{}'.format(cmd, stdout))
+                    return self.JOB_FAILED, msg
+
+                elif state in ok_job_status:
+                    # State of job is not failed and not completed,
+                    # we should wait.
                     jobs_still_running.append(job_name)
+
+                elif len(status_rows) == 2:
+                    # A special case where the job is so fresh that sacct can't
+                    # find the queried job. This results in only two rows
+                    # returned and we should keep polling the job later.
+                    jobs_still_running.append(job_name)
+
+                else:
+                    logging.error('Unknown job status "{}" from "{}"'.format(
+                        state, cmd))
+                    logging.error('Output from "{}":\n{}'.format(cmd, stdout))
+                    return self.JOB_FAILED, "Unknown job status"
 
             else:  # Check status of process using ps.
                 status = stdout.strip()
