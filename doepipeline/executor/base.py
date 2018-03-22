@@ -14,8 +14,9 @@ import abc
 import logging
 import time
 import platform
+import locale
 from io import StringIO
-from collections import Sequence, OrderedDict
+from collections import OrderedDict
 import pandas as pd
 
 from doepipeline import utils
@@ -90,6 +91,7 @@ class BasePipelineExecutor(object):
         self.running_jobs = dict()
         self.has_workdir = False
         self.has_experiment_dirs = False
+        self.encoding = locale.getpreferredencoding()
 
     @abc.abstractmethod
     def execute_command(self, command, watch=False, wait=False, **kwargs):
@@ -252,6 +254,7 @@ class BasePipelineExecutor(object):
             command = 'type NUL >> {file}'
         else:
             command = 'touch {file}'
+        logging.debug('Creates file: {}'.format(file_name))
         self.execute_command(command.format(file=file_name), **kwargs)
 
     def make_dir(self, dir, **kwargs):
