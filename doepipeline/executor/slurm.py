@@ -3,6 +3,48 @@ import os
 
 from doepipeline.executor.local import LocalPipelineExecutor
 
+# See https://slurm.schedmd.com/squeue.html for job state codes
+OK_JOB_STATUS = (
+    "CONFIGURING",
+    "COMPLETING",
+    "PENDING",
+    "RUNNING",
+    "RESV_DEL_HOLD",
+    "REQUEUE_FED",
+    "REQUEUE_HOLD",
+    "REQUEUE",
+    "RESIZING",
+    "REVOKED",
+    "SUSPENDED",
+    "SPECIAL_EXIT",
+    "SIGNALING"
+)
+FAIL_JOB_STATUS = (
+    "FAILED",
+    "BOOT_FAIL",
+    "CANCELLED",
+    "DEADLINE",
+    "FAILED",
+    "NODE_FAIL",
+    "OUT_OF_MEMORY",
+    "PREEMPTED",
+    "STOPPED",
+    "TIMEOUT"
+)
+
+# Specify the fields to request with sacct.
+# Expand the 'State' field so we don't risk getting a truncated msg.
+_field_len = 30
+SACCT_FIELDS = [
+    'JobID',
+    'JobName',
+    'Partition',
+    'Account',
+    'AllocCPUS',
+    'State%{}'.format(_field_len),
+    'ExitCode'
+]
+
 
 class SlurmPipelineExecutor(LocalPipelineExecutor):
 
@@ -62,8 +104,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                         job_name=exp_name,
                         cwd=current_workdir)
 
-                    # Potential bug below: What encoding to use? Different between platforms?
-                    job_id = completed_command.stdout.strip().split()[-1].decode(self.decoding)
+                    job_id = completed_command.stdout.strip().split()[-1].decode(self.encoding)
                     self.running_jobs[job_name] = {
                         'id': job_id, 'running_at_slurm': True
                     }
@@ -76,7 +117,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                         command,
                         job_name=exp_name,
                         cwd=current_workdir)
-                    job_id = completed_command.stdout.strip().decode(self.decoding)
+                    job_id = completed_command.stdout.strip().decode(self.encoding)
                     self.running_jobs[job_name] = {
                         'id': job_id,
                         'running_at_slurm': False
@@ -94,48 +135,6 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
         :return: status, message
         :rtype: str, str
         """
-        # See https://slurm.schedmd.com/squeue.html for job state codes
-        ok_job_status = (
-            "CONFIGURING",
-            "COMPLETING",
-            "PENDING",
-            "RUNNING",
-            "RESV_DEL_HOLD",
-            "REQUEUE_FED",
-            "REQUEUE_HOLD",
-            "REQUEUE",
-            "RESIZING",
-            "REVOKED",
-            "SUSPENDED",
-            "SPECIAL_EXIT",
-            "SIGNALING"
-        )
-        fail_job_status = (
-            "FAILED",
-            "BOOT_FAIL",
-            "CANCELLED",
-            "DEADLINE",
-            "FAILED",
-            "NODE_FAIL",
-            "OUT_OF_MEMORY",
-            "PREEMPTED",
-            "STOPPED",
-            "TIMEOUT"
-        )
-
-        # Specify the fields to request with sacct.
-        # Expand the 'State' field so we don't risk getting a truncated msg.
-        field_len = 30
-        sacct_fields = [
-            'JobID',
-            'JobName',
-            'Partition',
-            'Account',
-            'AllocCPUS',
-            'State%{}'.format(field_len),
-            'ExitCode'
-        ]
-
         jobs_still_running = list()
 
         # Copy jobs to allow mutation of self.running_jobs.
@@ -146,7 +145,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
             is_running_slurm = job_info['running_at_slurm']
             if is_running_slurm:
                 cmd = 'sacct -X -j {id} -o {fields}'.format(
-                    id=job_info['id'], fields=','.join(sacct_fields))
+                    id=job_info['id'], fields=','.join(SACCT_FIELDS))
                 check_returncode = True
             else:
                 cmd = 'ps -a | grep {pid}'.format(pid=job_info['id'])
@@ -156,7 +155,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
 
             completed_command = self.execute_command(
                 cmd, check=check_returncode)
-            stdout = completed_command.stdout.decode(self.decoding)
+            stdout = completed_command.stdout.decode(self.encoding)
             if is_running_slurm:
                 status_rows = stdout.strip().split('\n')
                 status_dict = dict(zip(status_rows[0].split(),
@@ -167,7 +166,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     logging.info('{0} finished'.format(job_name))
                     self.running_jobs.pop(job_name)
 
-                elif state in fail_job_status:
+                elif state in FAIL_JOB_STATUS:
                     # State of job is either terminated or failed.
                     exit_code = status_dict['ExitCode']
                     msg = '{} has terminated or failed. (exit code {})'.format(
@@ -177,7 +176,7 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     logging.error('Output from "{}":\n{}'.format(cmd, stdout))
                     return self.JOB_FAILED, msg
 
-                elif state in ok_job_status:
+                elif state in OK_JOB_STATUS:
                     # State of job is not failed and not completed,
                     # we should wait.
                     jobs_still_running.append(job_name)
