@@ -14,8 +14,9 @@ import abc
 import logging
 import time
 import platform
+import locale
 from io import StringIO
-from collections import Sequence, OrderedDict
+from collections import OrderedDict
 import pandas as pd
 
 from doepipeline import utils
@@ -90,7 +91,7 @@ class BasePipelineExecutor(object):
         self.running_jobs = dict()
         self.has_workdir = False
         self.has_experiment_dirs = False
-        self.decoding = 'utf-8'
+        self.encoding = locale.getpreferredencoding()
 
     @abc.abstractmethod
     def execute_command(self, command, watch=False, wait=False, **kwargs):
