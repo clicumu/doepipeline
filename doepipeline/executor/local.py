@@ -44,7 +44,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             logging.info('All jobs finished.')
             return self.JOB_FINISHED, 'no jobs running.'
 
-    def execute_command(self, command, watch=False, wait=False, check=True, **kwargs):
+    def execute_command(self, command, watch=False, wait=False, check=True, attempts=1, **kwargs):
         """ Execute given command by executing it in subprocess.
 
         Calls are made using `subprocess`-module like::
@@ -68,19 +68,25 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             if wait:
                 process.wait()
         else:
-            try:
-                # Note: This will wait until execution finished.
-                completed_process = subprocess.run(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    check=check,
-                    **kwargs)
-                return completed_process
-            except subprocess.CalledProcessError as e:
-                logging.error('Command failed: "{}"'.format(command))
-                raise CommandError(str(e))
+            while attempts:
+                try:
+                    # Note: This will wait until execution finished.
+                    attempts -= 1
+                    completed_process = subprocess.run(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        check=check,
+                        **kwargs)
+                    return completed_process
+                except subprocess.CalledProcessError as e:
+                    logging.error('Command failed:\n"{}"'.format(command))
+                    logging.error('Output from subprocess.run():\n{}'.format(completed_process))
+                    if attempts:
+                        logging.error('Retrying...')
+                        continue
+                    raise CommandError(str(e))
 
     def read_file_contents(self, file_name, directory=None, **kwargs):
         """ Read contents of local file.
