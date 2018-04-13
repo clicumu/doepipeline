@@ -62,7 +62,7 @@ def make_desirability_function(response):
     return desirability
 
 
-def predict_optimum(data_sheet, response, factor_names, criterion='minimize', **kwargs):
+def predict_optimum(data_sheet, response, factor_names, criterion='minimize', q2_limit=0.5, **kwargs):
 
     means = data_sheet.mean(axis=0)
     stds = data_sheet.std(axis=0)
@@ -90,10 +90,16 @@ def predict_optimum(data_sheet, response, factor_names, criterion='minimize', **
                                    '_response', n_folds)
 
     logging.info('Optimal model found (Q2={:.4f})'.format(q2))
-    logging.debug(str(model.summary()))
+    logging.info(str(model.summary()))
+
+    if q2 < q2_limit:
+        q2_msg = 'Terminating the optimization process since the predictive \
+        power of the model (Q2={}) is below the current cutoff ({})'.format(q2, q2_limit)
+        logging.error(q2_msg)
+        raise OptimizationFailed(q2_msg)
 
     logging.info('Finds optimum of current design.')
-    
+
     # Define optimization function for optimizer.
     def predicted_response(x, invert=False):
         df = pd.DataFrame(np.atleast_2d(x), columns=factor_names)
@@ -165,7 +171,7 @@ def stepwise_regression(data, response_column, k):
             terms = [term] + list(best_combination)
             q2 = crossvalidate_formula(formula_base + '+'.join(terms), data, response_column, k)
             term_results.append((q2, term))
-        
+
         current_best_q2, current_best_term = sorted(term_results)[-1]
 
         if current_best_q2 > best_q2:

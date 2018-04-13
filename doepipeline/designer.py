@@ -132,7 +132,8 @@ class ExperimentDesigner:
 
     def __init__(self, factors, design_type, responses, skip_screening=True,
                  at_edges='distort', relative_step=.25, gsd_reduction='auto',
-                 model_selection='brute', n_folds='loo', manual_formula=None):
+                 model_selection='brute', n_folds='loo', manual_formula=None,
+                 shrinkage=1.0, q2_limit=0.5):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
@@ -142,6 +143,8 @@ class ExperimentDesigner:
                 'model_selection must be "brute", "greedy", "manual".'
             assert n_folds == 'loo' or (isinstance(n_folds, int) and n_folds > 0), \
                 'n_folds must be "loo" or positive integer'
+            assert 0.9 <= shrinkage <= 1, 'shrinkage must be float between 0.9 and 1.0, not {}'.format(shrinkage)
+            assert 0 <= q2_limit <= 1, 'q2_limit must be float between 0 and 1, not {}'.format(q2_limit)
             if model_selection == 'manual':
                 assert isinstance(manual_formula, str), \
                     'If model_selection is "manual" formula must be provided.'
@@ -168,6 +171,8 @@ class ExperimentDesigner:
         self.gsd_reduction = gsd_reduction
         self.model_selection = model_selection
         self.n_folds = n_folds
+        self.shrinkage = shrinkage
+        self.q2_limit = q2_limit
         self._formula = manual_formula
         self._edge_action = at_edges
         self._phase = 'optimization' if self.skip_screening else 'screening'
@@ -278,7 +283,8 @@ class ExperimentDesigner:
                                                        criterion=criterion,
                                                        n_folds=self.n_folds,
                                                        model_selection=self.model_selection,
-                                                       manual_formula=self._formula)
+                                                       manual_formula=self._formula,
+                                                       q2_limit=self.q2_limit)
 
         # Update factors around predicted optimal settings, but keep
         # the same span as previously.
@@ -287,7 +293,7 @@ class ExperimentDesigner:
 
         ratios = (optimal_x - centers) / spans
         logging.debug(
-            'The distance of the factor optimas from the factor centers, ' 
+            'The distance of the factor optimas from the factor centers, '
             'expressed as the ratio of the step length:\n{}'.format(ratios)
         )
 
@@ -383,39 +389,61 @@ class ExperimentDesigner:
         return results
 
     def _update_numeric_factor(self, factor, name, ratio):
-        logging.debug('Updates factor {}: {}'.format(name, factor))
+        logging.info('Factor {}: Updating settings.'.format(name))
+        logging.info('Factor {}: Current settings: {}'.format(name, factor))
         step_length = self.step_length if self.step_length is not None \
             else abs(ratio)
+        step = factor.span * step_length * np.sign(ratio)
+        logging.debug('Factor {}: Step by which settings are adjusted is {}.'
+            .format(name, step))
+        logging.debug('Factor {}: Current span between high and low is {}.'
+            .format(name, factor.span))
+        logging.debug('Factor {}: Will shrink the span by {}.'
+            .format(name, self.shrinkage))
+        new_span = factor.span * self.shrinkage
+        logging.debug('Factor {}: New span is {}.'.format(name, new_span))
         if isinstance(factor, QuantitativeFactor):
-            step = factor.span * step_length * np.sign(ratio)
+            current_low_new = factor.center + step - new_span / 2
+            current_high_new = factor.center + step + new_span / 2
         elif isinstance(factor, OrdinalFactor):
-            step = np.round(factor.span * step_length) * np.sign(ratio)
+            current_low_new = np.round(factor.center + step - new_span / 2)
+            current_high_new = np.round(factor.center + step + new_span / 2)
         else:
             raise NotImplementedError
 
         # If the proposed step change takes us below or above min and max:
-        if factor.current_low + step < factor.min:
-            nudge = abs(factor.current_low + step - factor.min)
+        logging.debug('Factor {}: Proposed new factor low is {}.'
+            .format(name, current_low_new))
+        logging.debug('Factor {}: Proposed new factor high is {}.'
+            .format(name, current_high_new))
+        adjusted_settings = False
+        if current_low_new < factor.min:
+            nudge = abs(current_low_new - factor.min)
             logging.debug(
-                'Factor {}: minimum allowed setting ({}) would be exceeded '
-                '({}) by the proposed step change.'
-                    .format(name, factor.min, factor.current_low + step))
-            step += nudge
-            logging.debug(
-                'Adjusting step by {}, new step is {}.'.format(nudge, step))
+                'Factor {}: Minimum allowed setting ({}) would be exceeded by '
+                'the proposed new factor low.'.format(name, factor.min))
+            current_low_new += nudge
+            current_high_new += nudge
+            adjusted_settings = True
 
-        elif factor.current_high + step > factor.max:
-            nudge = abs(factor.current_high + step - factor.max)
+        elif current_high_new > factor.max:
+            nudge = abs(current_high_new - factor.max)
             logging.debug(
-                'Factor {}: maximum allowed setting ({}) would be exceeded '
-                '({}) by the proposed step change.'
-                    .format(name, factor.max, factor.current_high + step))
-            step -= nudge
-            logging.debug(
-                'Adjusting step by -{}, new step is {}.'.format(nudge, step))
-        factor.current_low += step
-        factor.current_high += step
-        logging.debug('Factor {} updated: {}'.format(name, factor))
+                'Factor {}: Maximum allowed setting ({}) would be exceeded by '
+                'the proposed new factor high.'.format(name, factor.max))
+            current_low_new -= nudge
+            current_high_new -= nudge
+            adjusted_settings = True
+
+        if adjusted_settings:
+            logging.debug('Factor {}: Adjusted the proposed new factor settings by {}.'.format(name, nudge))
+            logging.debug('Factor {}: New factor low is {}.'.format(name, current_low_new))
+            logging.debug('Factor {}: New factor high is {}.'.format(name, current_high_new))
+
+        factor.current_low = current_low_new
+        factor.current_high = current_high_new
+        logging.info('Factor {}: New settings: {}'.format(name, factor))
+        logging.info('Factor {}: Done updating.'.format(name))
 
     def _new_screening_design(self, reduction='auto'):
         factor_items = sorted(self.factors.items())

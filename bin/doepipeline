@@ -89,11 +89,21 @@ def make_parser():
                         help='log file (default: STDOUT)')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='if set, logging will be set to debug')
-    parser.add_argument('-m', '--model_selection_method', default='brute', 
+    parser.add_argument('-m', '--model_selection_method', default='brute',
                         choices=['brute', 'greedy'], help='The method of selecting \
                         the best model in each iteration. It\'s recommended to use \
                         "-m greedy" when fitting a quadratic model and factors are \
                         more than 3 because of the steep running time increase.')
+    parser.add_argument('-s', '--shrinkage', type=float, choices=[Range(0.9, 1)],
+                        help='The span between high and low settings for numeric/ordinal \
+                        factors can be decreased between iterations. The shrinkage \
+                        specifies the ratio that is retained of the previous span - i.e. \
+                        "-s 0.9" will decrease the span by 10%% between iterations. \
+                        Default is no shrinkage (1.0).', default=1.0)
+    parser.add_argument('-q', '--q2_limit', type=float, choices=[Range(0, 1)],
+                        help='The Q2 value (predictive power) of a model must be greater \
+                        than this value in order to continue the optimization process \
+                        (default: 0.5)', default=0.5)
 
     return parser
 
@@ -123,7 +133,9 @@ if __name__ == '__main__':
     designer = generator.new_designer_from_config(
         skip_screening=args.skip_screening,
         gsd_reduction=args.screening_reduction,
-        model_selection=args.model_selection_method)
+        model_selection=args.model_selection_method,
+        shrinkage=args.shrinkage,
+        q2_limit=args.q2_limit)
 
     if args.execution == 'slurm':
         executor_class = SlurmPipelineExecutor

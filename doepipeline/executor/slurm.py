@@ -106,7 +106,12 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
 
                     job_id = completed_command.stdout.strip().split()[-1].decode(self.encoding)
                     self.running_jobs[job_name] = {
-                        'id': job_id, 'running_at_slurm': True
+                        'id': job_id,
+                        'running_at_slurm': True,
+                        'restarts': 2,
+                        'command': command,
+                        'exp_workdir': current_workdir,
+                        'exp_name': exp_name
                     }
 
                 else:
@@ -176,6 +181,25 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                         exit_code)
                     logging.error(msg)
                     logging.error('Output from "{}":\n{}'.format(cmd, stdout))
+
+                    # Ugly fix for random segmentation faults that makes it
+                    # hard to get through the pipeline:
+                    if exit_code == "11:0":
+                        logging.error('Interpreting this as a segmentation fault. Attempting to restart the job.')
+                        if job_info['restarts']:
+                            self.running_jobs[job_name]['restarts'] -= 1
+                            completed_command = self.execute_command(
+                                job_info['command'],
+                                job_name=job_info['exp_name'],
+                                cwd=job_info['exp_workdir'])
+                            job_id = completed_command.stdout.strip().split()[-1].decode(self.encoding)
+                            self.running_jobs[job_name]['id'] = job_id
+                            jobs_still_running.append(job_name)
+                            logging.error('Successfully restarted the failed job.')
+                            continue
+                        else:
+                            logging.error('Out of restart attempts.')
+
                     return self.JOB_FAILED, msg
 
                 elif state in OK_JOB_STATUS:
