@@ -104,6 +104,7 @@ def make_parser():
                         help='The Q2 value (predictive power) of a model must be greater \
                         than this value in order to continue the optimization process \
                         (default: 0.5)', default=0.5)
+    # TODO: Flag for setting maximum number of threads when running in parallel mode. As of now, it will start all jobs irregardles of how many threads are available.
 
     return parser
 
@@ -142,17 +143,17 @@ if __name__ == '__main__':
     elif args.execution == 'serial':
         executor_class = LocalPipelineExecutor
     elif args.execution == 'parallel':
-        executor_class = lambda *a, **kw: LocalPipelineExecutor(*a,
-                                                                run_serial=False,
-                                                                **kw)
+        executor_class = lambda *a, **kw: LocalPipelineExecutor(
+            *a, run_serial=False, **kw)
     else:
         sys.exit('Unknown executor: {}'.format(args.execution))
 
     n_iter = 0
+    old_optimum = None
     while n_iter < args.maxiter:
         n_iter += 1
 
-        if not args.skip_screening and n_iter==1:
+        if not args.skip_screening and n_iter == 1:
             logging.info('Starts iteration {} (screening).'.format(n_iter))
         else:
             logging.info('Starts iteration {} (optimization).'.format(n_iter))
@@ -161,9 +162,10 @@ if __name__ == '__main__':
 
         logging.info('Sets up new design.')
         design = designer.new_design()
-        logging.info('The following experiments will be run:\n{}'.format(design))
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+            logging.info('The following experiments will be run:\n{}'.format(design))
 
-        logging.info('Prepares pipeline with design parameters.')
+        logging.info('Preparing pipeline with design parameters.')
         pipeline = generator.new_pipeline_collection(design)
 
         logging.info('Start execution of pipeline.')
@@ -172,17 +174,68 @@ if __name__ == '__main__':
         exp_sheet_complete = pd.concat([design, results], axis=1)
         exp_sheet_complete.index.name = 'Exp'
         exp_sheet_outfile = os.path.join(
-            pipeline['WORKDIR'],
-            'complete_experimental_sheet_iter_{0}.csv'.format(n_iter))
-        logging.info('The design sheet with results:\n{}'.format(exp_sheet_complete))
+            pipeline['WORKDIR'], 'complete_experimental_sheet.csv')
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+            logging.info('The design sheet with results:\n{}'.format(exp_sheet_complete))
         logging.info('Saving the design sheet and result in {}'.format(exp_sheet_outfile))
         exp_sheet_complete.to_csv(exp_sheet_outfile)
 
-        logging.info('Execution iteration {} finished, finding optimum'.format(n_iter))
-        optimum = designer.update_factors_from_response(results, tol=args.tol)
+        logging.info('Execution of iteration {} finished.'.format(n_iter))
+        optimum = designer.get_optimal_settings(results)
+
+        if not optimum.empirically_found:
+            # If the optimum was predicted from a model
+            if not optimum.predicted_optimum.empty:
+                # If it was possible to obtain a prediction, run a validation
+                # experiment with the predicted optimal settings
+                logging.info(
+                    'Will run a validation experiment using the predicted '
+                    'optimal settings.\n{}'.format(optimum.predicted_optimum))
+                validation_experiment_raw = pd.DataFrame(
+                    optimum.predicted_optimum,
+                    columns=['validation']).transpose()
+                # Round any ordinal factors
+                validation_experiment = designer.fix_experiments(validation_experiment_raw)
+                validation_pipeline = generator.new_pipeline_collection(validation_experiment, validation_run=True)
+                validation_result = executor.run_pipeline_collection(validation_pipeline)
+                logging.info('Done with execution of the validation experiment. The result was:\n{}'.format(validation_result))
+                results = pd.concat([results, validation_result])
+                design = pd.concat([design, validation_experiment])
+
+            # Find the best experiment (incl. possible validation experiment)
+            optimal_experiment = designer.get_best_experiment(design, results)
+
+            if optimal_experiment['new_best']:
+                logging.info('Found a new best response among the experiments in this iteration.')
+
+                if optimal_experiment['factor_settings'].name == 'validation':
+                    logging.info('It was found using the predicted optimal settings.')
+                else:
+                    logging.info('It was not found using the predicted optimal settings.')
+
+                # Update the factor settings based on the best experiment
+                optimum = designer.update_factors_from_optimum(optimal_experiment, tol=args.tol)
+
+            else:
+                logging.info('Did not find a better response in this iteration compared to the previous one.')
+                logging.info('Rolling back to the best result in previous iteration.')
+                optimum = old_optimum
+
+                if not optimum.reached_limits:
+                    logging.warning('Response limits were not reached.')
+                    if not args.skip_screening and args.reevaluate_screening:
+                        logging.info(('Re-evaluate screening results to optimize '
+                        'from next best screening results.'))
+                        designer.reevaluate_screening()
+                        continue
+
+                # Since the best response in this iteration was worse than before, stop
+                break
+
+        old_optimum = optimum
 
         if optimum.converged:
-            logging.info('Convergence reached after {} iterations. '.format(n_iter))
+            logging.info('Convergence reached after {} iterations.'.format(n_iter))
 
             if not optimum.reached_limits:
                 logging.warning('Response limits not reached.')

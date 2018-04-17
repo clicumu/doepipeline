@@ -77,7 +77,7 @@ class PipelineGenerator:
         responses = self._config['design']['responses']
         return designer_class(factors, design_type, responses, *args, **kwargs)
 
-    def new_pipeline_collection(self, experiment_design, exp_id_column=None):
+    def new_pipeline_collection(self, experiment_design, exp_id_column=None, validation_run=False):
         """ Given experiment, create script-strings to execute.
 
         Parameter settings from experimental design are used to
@@ -100,7 +100,7 @@ class PipelineGenerator:
         :rtype: collections.OrderedDict
         """
         pipeline_collection = collections.OrderedDict()
-        if not self._setting_up:
+        if not self._setting_up and not validation_run:
             self._current_iteration += 1
             self._update_working_directory()
 
@@ -331,4 +331,3 @@ def _validate_setup_scrip_config(config_dict, valid_before):
             assert all(isinstance(value, str) for value \
                        in before['environment_variables'].values()), \
                 'environment_variables values must be strings'
-

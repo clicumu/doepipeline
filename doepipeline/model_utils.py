@@ -63,14 +63,23 @@ def make_desirability_function(response):
 
 
 def predict_optimum(data_sheet, response, factor_names, criterion='minimize', q2_limit=0.5, **kwargs):
+    """
+    Fits a model from the experimental sheet and response(s) and returns the
+    optimum, model, and prediction. If the Q2 value of the found model is below
+    the limit, or if optimization fails, returns None for the optimum and the
+    prediction.
+    """
 
+    predicted_optimum = None
+    optimum = pd.Series([])
     means = data_sheet.mean(axis=0)
     stds = data_sheet.std(axis=0)
     data_sheet = (data_sheet - means) / stds
 
     x0 = data_sheet.median(axis=0).values
 
-    # Set up bounds for optimization to keep it inside the current design space.
+    # Set up bounds for optimization to keep it inside the current design
+    # space.
     mins = data_sheet.min(axis=0)
     maxes = data_sheet.max(axis=0)
     bounds = list(zip(mins, maxes))
@@ -89,35 +98,44 @@ def predict_optimum(data_sheet, response, factor_names, criterion='minimize', q2
         q2 = crossvalidate_formula(kwargs['manual_formula'], data_sheet,
                                    '_response', n_folds)
 
-    logging.info('Optimal model found (Q2={:.4f})'.format(q2))
-    logging.info(str(model.summary()))
+    logging.info('Best model found (Q2={:.4f})'.format(q2))
+    logging.info('\n'+str(model.summary()))
 
     if q2 < q2_limit:
-        q2_msg = 'Terminating the optimization process since the predictive \
-        power of the model (Q2={}) is below the current cutoff ({})'.format(q2, q2_limit)
-        logging.error(q2_msg)
-        raise OptimizationFailed(q2_msg)
+        q2_msg = 'The predictive power of the model (Q2={}) is below the \
+        current cutoff ({}). Will not search for an optimum.'.format(
+            q2, q2_limit)
+        logging.info(q2_msg)
+    else:
+        logging.info('Finds the optimum from the current model.')
 
-    logging.info('Finds optimum of current design.')
+        # Define optimization function for optimizer.
+        def predicted_response(x, invert=False):
+            df = pd.DataFrame(np.atleast_2d(x), columns=factor_names)
+            return (-1 if invert else 1) * model.predict(df)[0]
 
-    # Define optimization function for optimizer.
-    def predicted_response(x, invert=False):
-        df = pd.DataFrame(np.atleast_2d(x), columns=factor_names)
-        return (-1 if invert else 1) * model.predict(df)[0]
+        if criterion == 'maximize':
+            optimization_results = minimize(
+                lambda x: predicted_response(x, True),
+                x0, method='L-BFGS-B',
+                bounds=bounds)
+        elif criterion == 'minimize':
+            optimization_results = minimize(
+                predicted_response,
+                x0,
+                method='L-BFGS-B',
+                bounds=bounds)
 
-    if criterion == 'maximize':
-        optimization_results = minimize(lambda x: predicted_response(x, True),
-                                        x0, method='L-BFGS-B', bounds=bounds)
-    elif criterion == 'minimize':
-        optimization_results = minimize(predicted_response, x0,
-                                        method='L-BFGS-B', bounds=bounds)
-
-    if not optimization_results['success']:
-        raise OptimizationFailed(optimization_results['message'])
-
-    predicted_optimum = model.predict(pd.DataFrame(optimization_results['x'],
-                                                   index=means.index).T)[0]
-    optimum = (optimization_results['x'] * stds) + means
+        if not optimization_results['success']:
+            logging.info('Was not able to find the optimum: {}'.format(
+                optimization_results['message']))
+        else:
+            predicted_optimum = model.predict(
+                pd.DataFrame(optimization_results['x'], index=means.index).T)[0]
+            optimum = (optimization_results['x'] * stds) + means
+            logging.info('Optimum found:\n{}'.format(optimum))
+            logging.info('Predicted response using the found optimum:\n{}'.format(
+                predicted_optimum))
     return optimum, model, predicted_optimum
 
 
