@@ -271,10 +271,10 @@ class ExperimentDesigner:
         if self._best_experiment['optimal_x'].empty:
             update = True
         elif result['criterion'] == 'maximize':
-            if result['weighted_response'] >= self._best_experiment['weighted_y']:
+            if result['weighted_response'] > self._best_experiment['weighted_y']:
                 update = True
         elif result['criterion'] == 'minimize':
-            if result['weighted_response'] <= self._best_experiment['weighted_y']:
+            if result['weighted_response'] < self._best_experiment['weighted_y']:
                 update = True
         if update:
             self._best_experiment['optimal_x'] = result['factor_settings']
