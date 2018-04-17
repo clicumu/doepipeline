@@ -436,13 +436,11 @@ class ExperimentDesigner:
             manual_formula=self._formula,
             q2_limit=self.q2_limit)
 
-        optimization_results = None
+        optimization_results = pd.Series(
+            index=self._design_sheet.columns,
+            dtype=object)
         if not optimal_x.empty:
             # If Q2 of model was above the limit and if an optimum was found
-            optimization_results = pd.Series(
-                index=self._design_sheet.columns,
-                dtype=object)
-
             for name, factor in self.factors.items():
                 if isinstance(factor, CategoricalFactor):
                     optimization_results[name] = factor.fixed_value

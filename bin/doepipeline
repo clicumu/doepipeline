@@ -185,7 +185,7 @@ if __name__ == '__main__':
 
         if not optimum.empirically_found:
             # If the optimum was predicted from a model
-            if not optimum.predicted_optimum.empty:
+            if not optimum.predicted_optimum.isnull().all():
                 # If it was possible to obtain a prediction, run a validation
                 # experiment with the predicted optimal settings
                 logging.info(
