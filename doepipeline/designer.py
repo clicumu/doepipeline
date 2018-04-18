@@ -206,33 +206,6 @@ class ExperimentDesigner:
         else:
             return self._new_optimization_design()
 
-    def fix_experiments(self, experimental_sheet):
-        """
-        Rounds ordinal factors settings in an experiment sheet.
-        """
-        assert isinstance(experimental_sheet, pd.core.frame.DataFrame), \
-            'The input experimental sheet must be a pandas DataFrame'
-        assert sorted(experimental_sheet.columns) == sorted(self.factors), \
-            'The factors of the experimental sheet must match those in the \
-            pipeline. You input:\n{}\nThey should be:\n{}'.format(
-                list(experimental_sheet.columns),
-                list(self.factors.keys()))
-
-        logging.debug('Rounding ordinal factors settings to nearest int.')
-        logging.debug('Experiments to treat:\n{}'.format(experimental_sheet))
-
-        for name, factor in self.factors.items():
-            if isinstance(factor, OrdinalFactor):
-                logging.debug('Treating factor {}; {}.'.format(name, factor))
-                factor_series = experimental_sheet[name]
-                factor_series = factor_series.astype(np.float).round()
-                factor_series = factor_series.astype(np.int64)
-                experimental_sheet[name]= factor_series
-
-        logging.debug('After treatment:\n{}'.format(experimental_sheet))
-
-        return experimental_sheet
-
     def get_optimal_settings(self, response):
         """
         Calculate optimal factor settings given response. Returns calculated
@@ -444,6 +417,8 @@ class ExperimentDesigner:
             for name, factor in self.factors.items():
                 if isinstance(factor, CategoricalFactor):
                     optimization_results[name] = factor.fixed_value
+                elif isinstance(factor, OrdinalFactor):
+                    optimization_results[name] = int(np.round(optimal_x[name]))
                 else:
                     optimization_results[name] = optimal_x[name]
 

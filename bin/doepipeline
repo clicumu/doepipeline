@@ -191,11 +191,9 @@ if __name__ == '__main__':
                 logging.info(
                     'Will run a validation experiment using the predicted '
                     'optimal settings.\n{}'.format(optimum.predicted_optimum))
-                validation_experiment_raw = pd.DataFrame(
+                validation_experiment = pd.DataFrame(
                     optimum.predicted_optimum,
                     columns=['validation']).transpose()
-                # Round any ordinal factors
-                validation_experiment = designer.fix_experiments(validation_experiment_raw)
                 validation_pipeline = generator.new_pipeline_collection(validation_experiment, validation_run=True)
                 validation_result = executor.run_pipeline_collection(validation_pipeline)
                 logging.info('Done with execution of the validation experiment. The result was:\n{}'.format(validation_result))
