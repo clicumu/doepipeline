@@ -104,6 +104,13 @@ def make_parser():
                         help='The Q2 value (predictive power) of a model must be greater \
                         than this value in order to continue the optimization process \
                         (default: 0.5)', default=0.5)
+    parser.add_argument('--gsd_span_ratio', type=float, choices=[Range(0,1)],
+                        default=0.5, help='After running screening, the factor highs \
+                        and lows for the coming optimization iteration are placed around \
+                        the point in the screening design that produced the best result. \
+                        This option sets the distance between the new highs and lows (span) \
+                        to a ratio of the span between nearest points of the best screening \
+                        point (default 0.5).')
     # TODO: Flag for setting maximum number of threads when running in parallel mode. As of now, it will start all jobs irregardles of how many threads are available.
 
     return parser
@@ -190,13 +197,19 @@ if __name__ == '__main__':
                 # experiment with the predicted optimal settings
                 logging.info(
                     'Will run a validation experiment using the predicted '
-                    'optimal settings.\n{}'.format(optimum.predicted_optimum))
+                    'optimal settings.')
                 validation_experiment = pd.DataFrame(
                     optimum.predicted_optimum,
                     columns=['validation']).transpose()
                 validation_pipeline = generator.new_pipeline_collection(validation_experiment, validation_run=True)
                 validation_result = executor.run_pipeline_collection(validation_pipeline)
+
                 logging.info('Done with execution of the validation experiment. The result was:\n{}'.format(validation_result))
+
+                if validation_result.shape[1] > 1:
+                    combined_response = designer.treat_response(response, perform_transform=False)
+                    logging.info('The combined response was:\n{}'.format(combined_response))
+
                 results = pd.concat([results, validation_result])
                 design = pd.concat([design, validation_experiment])
 
@@ -205,6 +218,7 @@ if __name__ == '__main__':
 
             if optimal_experiment['new_best']:
                 logging.info('Found a new best response among the experiments in this iteration.')
+                best_results = optimal_experiment
 
                 if optimal_experiment['factor_settings'].name == 'validation':
                     logging.info('It was found using the predicted optimal settings.')
@@ -243,8 +257,9 @@ if __name__ == '__main__':
                     designer.reevaluate_screening()
                     continue
 
-            logging.info('Saves output to {}.'.format(n_iter, args.output))
+            logging.info('Saving best settings to {}.'.format(n_iter, args.output))
             optimum.predicted_optimum.to_csv(args.output)
+
             break
 
     if not optimum.converged:
@@ -259,4 +274,8 @@ if __name__ == '__main__':
         logging.info('Saves unconverged results to {}.'.format(outpath))
         optimum.predicted_optimum.to_csv(outpath)
 
+    logging.info('Best response was:\n{}'.format(best_results['response']))
+    logging.info('The settings were:\n{}'.format(best_results['factor_settings']))
+    if best_results['response'].shape[1] > 1:
+        logging.info('The combined response was:\n{}'.format(best_results['weighted_response']))
     logging.info('Shuts down.')

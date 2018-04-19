@@ -133,7 +133,7 @@ class ExperimentDesigner:
     def __init__(self, factors, design_type, responses, skip_screening=True,
                  at_edges='distort', relative_step=.25, gsd_reduction='auto',
                  model_selection='brute', n_folds='loo', manual_formula=None,
-                 shrinkage=1.0, q2_limit=0.5):
+                 shrinkage=1.0, q2_limit=0.5, gsd_span_ratio=0.5):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
@@ -179,6 +179,7 @@ class ExperimentDesigner:
         self._phase = 'optimization' if self.skip_screening else 'screening'
         self._n_screening_evaluations = 0
         self._factor_types = factor_types
+        self._gsd_span_ratio = gsd_span_ratio
         self._best_experiment = {
                 'optimal_x': pd.Series([]),
                 'optimal_y': None,
@@ -228,13 +229,13 @@ class ExperimentDesigner:
         response = response.copy()
 
         # Perform any transformations or weigh together multiple responses:
-        treated_response, criterion = self._treat_response(response)
+        treated_response, criterion = self.treat_response(response)
 
         if self._phase == 'screening':
             # Find the best screening result and update factors accordingly
             self._screening_response = treated_response
             self._screening_criterion = criterion
-            return self._evaluate_screening(treated_response, criterion)
+            return self._evaluate_screening(treated_response, criterion, self._gsd_span_ratio)
         else:
             # Predict optimal parameter settings, but don't update factors
             return self._predict_optimum_settings(treated_response, criterion)
@@ -279,7 +280,7 @@ class ExperimentDesigner:
                 list(response_sheet.columns),
                 list(self.responses.keys()))
 
-        treated_response, criterion = self._treat_response(
+        treated_response, criterion = self.treat_response(
             response_sheet, perform_transform=False)
 
         treated_response = treated_response.iloc[:, 0]
@@ -290,7 +291,7 @@ class ExperimentDesigner:
         else:
             raise NotImplementedError
 
-        optimum_settings = experimental_sheet.loc[optimum_i]
+        optimum_settings = experimental_sheet.iloc[optimum_i]
 
         results = OrderedDict()
         optimal_weighted_response = np.array(treated_response.iloc[optimum_i])
@@ -303,7 +304,7 @@ class ExperimentDesigner:
         results['old_best'] = self._best_experiment
 
         has_multiple_responses = response_sheet.shape[1] > 1
-        logging.debug('The best response was found in experiment:\n{}'.format(optimum_i))
+        logging.debug('The best response was found in experiment:\n{}'.format(optimum_settings.name))
         logging.debug('The response values were:\n{}'.format(response_sheet.iloc[optimum_i]))
         if has_multiple_responses:
             logging.debug('The weighed response was:\n{}'.format(treated_response.iloc[optimum_i]))
@@ -431,7 +432,7 @@ class ExperimentDesigner:
 
         return result
 
-    def _treat_response(self, response, perform_transform=True):
+    def treat_response(self, response, perform_transform=True):
         """
         Perform any specified transformations on the response.
 
@@ -486,18 +487,22 @@ class ExperimentDesigner:
 
         return self._evaluate_screening(self._screening_response,
                                         self._screening_criterion,
+                                        self._gsd_span_ratio,
                                         self._n_screening_evaluations + 1)
 
-    def _evaluate_screening(self, response, criterion, use_index=1):
+    def _evaluate_screening(self, response, criterion, span_ratio, use_index=1):
+        """
+        :param float span_ratio: The ratio of the span between gsd points that will be used in the following optimization design.
+        """
         self._n_screening_evaluations += 1
 
         logging.info('Evaluating screening results.')
-        response = response.iloc[:, 0]
+        response_series = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
-            optimum_i = response.argsort().iloc[-use_index]
+            optimum_i = response_series.argsort().iloc[-use_index]
         elif criterion == 'minimize':
-            optimum_i = response.argsort().iloc[use_index - 1]
+            optimum_i = response_series.argsort().iloc[use_index - 1]
         else:
             raise NotImplementedError
 
@@ -516,6 +521,14 @@ class ExperimentDesigner:
 
                 min_ = factor_levels[max([0, factor_level - 1])]
                 max_ = factor_levels[min([factor_level + 1, len(factor_levels) - 1])]
+
+                # Shrink the span a bit
+                span = max_ - min_
+                min_ = min_ + span_ratio/2 * span
+                max_ = max_ - span_ratio/2 * span
+                logging.debug('Factor {} span: {}'.format(name, span))
+                logging.debug('Factor {} adjusting span with gsd_span_ratio {}'.format(name, span_ratio))
+                logging.debug('Factor {} span: {}'.format(name, max_ - min_))
 
                 if isinstance(factor, OrdinalFactor):
                     min_ = int(np.round(min_))
@@ -541,6 +554,8 @@ class ExperimentDesigner:
             logging.info('The combined response was:\n{}'.format(response.iloc[optimum_i]))
         logging.info('The factor settings were:\n{}'.format(results.predicted_optimum))
 
+        # update current best experiment
+        self.get_best_experiment(self._design_sheet, response)
         self._phase = 'optimization'
         return results
 

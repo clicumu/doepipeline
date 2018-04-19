@@ -189,13 +189,14 @@ class BasePipelineExecutor(object):
                 continue
 
             experiment_index.append(job_name)
-            logging.info('Creating directory: {}'.format(job_name))
+            logging.debug('Creating directory: {}'.format(job_name))
             self.make_dir(str(job_name))
 
             for job_name, script in zip(job_steps, scripts):
                 job_steps[job_name].append(script)
 
         self.has_experiment_dirs = True
+        logging.info('Executing pipeline.')
         self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)
 
         # Step into each work folder and collect pipeline results.
@@ -264,7 +265,7 @@ class BasePipelineExecutor(object):
         results = OrderedDict()
         for job_name in experiment_index:
             file_name = pipeline_collection['RESULTS_FILE']
-            logging.info('Reads pipeline results from {}'.format(file_name))
+            logging.debug('Reads pipeline results from {}'.format(file_name))
             contents = self.read_file_contents(file_name, directory=str(job_name))
             f_handle = StringIO(contents)
             current_results = pd.Series.from_csv(f_handle)

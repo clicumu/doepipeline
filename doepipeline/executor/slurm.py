@@ -74,6 +74,8 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
             else:
                 command_step = 'nohup {script} 2>&1 & echo $!'
 
+            logging.info('Starts pipeline step: {}'.format(step_name))
+
             for exp_name, script in zip(experiment_index, step):
                 current_workdir = os.path.join(self.workdir, str(exp_name))
                 job_name = '{0}_exp_{1}'.format(step_name, exp_name)
