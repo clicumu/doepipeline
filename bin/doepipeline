@@ -189,6 +189,8 @@ if __name__ == '__main__':
 
         logging.info('Execution of iteration {} finished.'.format(n_iter))
         optimum = designer.get_optimal_settings(results)
+        if n_iter < 2 and not args.skip_screening:
+            best_results = designer.get_best_experiment(design, results)
 
         if not optimum.empirically_found:
             # If the optimum was predicted from a model
