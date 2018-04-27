@@ -280,6 +280,7 @@ class ExperimentDesigner:
                 list(response_sheet.columns),
                 list(self.responses.keys()))
 
+        response = response_sheet.copy()
         treated_response, criterion = self.treat_response(
             response_sheet, perform_transform=False)
 
@@ -295,7 +296,7 @@ class ExperimentDesigner:
 
         results = OrderedDict()
         optimal_weighted_response = np.array(treated_response.iloc[optimum_i])
-        optimal_response = response_sheet.iloc[optimum_i]
+        optimal_response = response.iloc[optimum_i]
         results['factor_settings'] = optimum_settings
         results['weighted_response'] = optimal_weighted_response
         results['response'] = optimal_response
@@ -303,9 +304,9 @@ class ExperimentDesigner:
         results['new_best'] = False
         results['old_best'] = self._best_experiment
 
-        has_multiple_responses = response_sheet.shape[1] > 1
+        has_multiple_responses = response.shape[1] > 1
         logging.debug('The best response was found in experiment:\n{}'.format(optimum_settings.name))
-        logging.debug('The response values were:\n{}'.format(response_sheet.iloc[optimum_i]))
+        logging.debug('The response values were:\n{}'.format(response.iloc[optimum_i]))
         if has_multiple_responses:
             logging.debug('The weighed response was:\n{}'.format(treated_response.iloc[optimum_i]))
         logging.debug('Will return optimum settings:\n{}'.format(results['factor_settings']))
@@ -490,6 +491,38 @@ class ExperimentDesigner:
                                         self._gsd_span_ratio,
                                         self._n_screening_evaluations + 1)
 
+    def _validate_new_factor_limits(self, factor, factor_name, low_limit, high_limit):
+        # If the proposed step change takes us below or above min and max:
+        logging.debug('Factor {}: Proposed new factor low is {}.'
+            .format(factor_name, low_limit))
+        logging.debug('Factor {}: Proposed new factor high is {}.'
+            .format(factor_name, high_limit))
+        adjusted_settings = False
+        if low_limit < factor.min:
+            nudge = abs(low_limit - factor.min)
+            logging.debug(
+                'Factor {}: Minimum allowed setting ({}) would be exceeded by '
+                'the proposed new factor low.'.format(factor_name, factor.min))
+            low_limit += nudge
+            high_limit += nudge
+            adjusted_settings = True
+
+        elif high_limit > factor.max:
+            nudge = abs(high_limit - factor.max)
+            logging.debug(
+                'Factor {}: Maximum allowed setting ({}) would be exceeded by '
+                'the proposed new factor high.'.format(factor_name, factor.max))
+            low_limit -= nudge
+            high_limit -= nudge
+            adjusted_settings = True
+
+        if adjusted_settings:
+            logging.debug('Factor {}: Adjusted the proposed new factor settings by {}.'.format(factor_name, nudge))
+            logging.debug('Factor {}: New factor low is {}.'.format(factor_name, low_limit))
+            logging.debug('Factor {}: New factor high is {}.'.format(factor_name, high_limit))
+
+        return (low_limit, high_limit)
+
     def _evaluate_screening(self, response, criterion, span_ratio, use_index=1):
         """
         :param float span_ratio: The ratio of the span between gsd points that will be used in the following optimization design.
@@ -521,24 +554,33 @@ class ExperimentDesigner:
 
                 min_ = factor_levels[max([0, factor_level - 1])]
                 max_ = factor_levels[min([factor_level + 1, len(factor_levels) - 1])]
+                span = max_ - min_
 
                 # Shrink the span a bit
-                span = max_ - min_
-                min_ = min_ + span_ratio/2 * span
-                max_ = max_ - span_ratio/2 * span
                 logging.debug('Factor {} span: {}'.format(name, span))
                 logging.debug('Factor {} adjusting span with gsd_span_ratio {}'.format(name, span_ratio))
-                logging.debug('Factor {} span: {}'.format(name, max_ - min_))
+                span = span * span_ratio
+                logging.debug('Factor {} span: {}'.format(name, span))
+
+                # center around best point
+                best_point = factor_levels[factor_level]
+                new_low = best_point - span/2
+                new_high = best_point + span/2
 
                 if isinstance(factor, OrdinalFactor):
-                    min_ = int(np.round(min_))
-                    max_ = int(np.round(max_))
+                    new_low = int(np.round(new_low))
+                    new_high = int(np.round(new_high))
 
-                factor.current_low = min_
-                factor.current_high = max_
+                # nudge new high and low so we don't exceed the limits
+                new_low, new_high = self._validate_new_factor_limits(
+                    factor, name, new_low, new_high)
+
+                # update factors
+                factor.current_low = new_low
+                factor.current_high = new_high
 
             optimum_settings[name] = factor_levels[factor_level]
-            logging.debug('New settings for factor {}:\n{}'.format(
+            logging.info('New settings for factor {}:\n{}'.format(
                 name, factor))
 
         results = OptimizationResult(
@@ -555,7 +597,7 @@ class ExperimentDesigner:
         logging.info('The factor settings were:\n{}'.format(results.predicted_optimum))
 
         # update current best experiment
-        self.get_best_experiment(self._design_sheet, response)
+        self.get_best_experiment(self._design_sheet, self._response_values if len(self._response_values.columns) > 1 else response)
         self._phase = 'optimization'
         return results
 
@@ -583,36 +625,11 @@ class ExperimentDesigner:
             raise NotImplementedError
 
         # If the proposed step change takes us below or above min and max:
-        logging.debug('Factor {}: Proposed new factor low is {}.'
-            .format(name, current_low_new))
-        logging.debug('Factor {}: Proposed new factor high is {}.'
-            .format(name, current_high_new))
-        adjusted_settings = False
-        if current_low_new < factor.min:
-            nudge = abs(current_low_new - factor.min)
-            logging.debug(
-                'Factor {}: Minimum allowed setting ({}) would be exceeded by '
-                'the proposed new factor low.'.format(name, factor.min))
-            current_low_new += nudge
-            current_high_new += nudge
-            adjusted_settings = True
+        new_low, new_high = self._validate_new_factor_limits(
+            factor, name, current_low_new, current_high_new)
 
-        elif current_high_new > factor.max:
-            nudge = abs(current_high_new - factor.max)
-            logging.debug(
-                'Factor {}: Maximum allowed setting ({}) would be exceeded by '
-                'the proposed new factor high.'.format(name, factor.max))
-            current_low_new -= nudge
-            current_high_new -= nudge
-            adjusted_settings = True
-
-        if adjusted_settings:
-            logging.debug('Factor {}: Adjusted the proposed new factor settings by {}.'.format(name, nudge))
-            logging.debug('Factor {}: New factor low is {}.'.format(name, current_low_new))
-            logging.debug('Factor {}: New factor high is {}.'.format(name, current_high_new))
-
-        factor.current_low = current_low_new
-        factor.current_high = current_high_new
+        factor.current_low = new_low
+        factor.current_high = new_high
         logging.info('Factor {}: New settings: {}'.format(name, factor))
         logging.info('Factor {}: Done updating.'.format(name))
 

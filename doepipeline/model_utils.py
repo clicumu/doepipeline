@@ -106,6 +106,9 @@ def predict_optimum(data_sheet, response, factor_names, criterion='minimize', q2
         current cutoff ({}). Will not search for an optimum.'.format(
             q2, q2_limit)
         logging.info(q2_msg)
+    elif np.isnan(q2):
+        q2_msg = 'Failed to create a model. Will not search for an optimum.'
+        logging.info(q2_msg)
     else:
         logging.info('Finds the optimum from the current model.')
 

@@ -209,7 +209,7 @@ if __name__ == '__main__':
                 logging.info('Done with execution of the validation experiment. The result was:\n{}'.format(validation_result))
 
                 if validation_result.shape[1] > 1:
-                    combined_response = designer.treat_response(response, perform_transform=False)
+                    combined_response, _ = designer.treat_response(validation_result, perform_transform=False)
                     logging.info('The combined response was:\n{}'.format(combined_response))
 
                 results = pd.concat([results, validation_result])
@@ -278,6 +278,6 @@ if __name__ == '__main__':
 
     logging.info('Best response was:\n{}'.format(best_results['response']))
     logging.info('The settings were:\n{}'.format(best_results['factor_settings']))
-    if best_results['response'].shape[1] > 1:
+    if best_results['response'].shape[0] > 1:
         logging.info('The combined response was:\n{}'.format(best_results['weighted_response']))
     logging.info('Shuts down.')
