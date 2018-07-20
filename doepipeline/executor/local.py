@@ -147,6 +147,9 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
     def make_dir(self, dir, **kwargs):
         logging.debug('Make directory: {} (kwargs {})'.format(dir, kwargs))
+        if os.path.isdir(dir):
+            logging.warning('Directory already exists. {}'.format(dir))
+            return
         try:
             os.makedirs(dir, **kwargs)
         except (OSError, FileExistsError) as e:
