@@ -176,10 +176,12 @@ class ExperimentDesigner:
         self.q2_limit = q2_limit
         self._formula = manual_formula
         self._edge_action = at_edges
+        self._allowed_phases = ['optimization', 'screening']
         self._phase = 'optimization' if self.skip_screening else 'screening'
         self._n_screening_evaluations = 0
         self._factor_types = factor_types
         self._gsd_span_ratio = gsd_span_ratio
+        self._stored_transform = lambda x: x
         self._best_experiment = {
                 'optimal_x': pd.Series([]),
                 'optimal_y': None,
@@ -206,6 +208,54 @@ class ExperimentDesigner:
             return self._new_screening_design(reduction=self.gsd_reduction)
         else:
             return self._new_optimization_design()
+
+    def write_factor_csv(self, out_file):
+        factors = list()
+        idx = pd.Index(['fixed_value', 'current_low', 'current_high'])
+
+        for name, factor in self.factors.items():
+            current_min = None
+            current_high = None
+            fixed_value = None
+
+            if issubclass(type(factor), NumericFactor):
+                current_min = factor.current_low
+                current_high = factor.current_high
+            elif isinstance(factor, CategoricalFactor):
+                fixed_value = factor.fixed_value
+            else:
+                raise NotImplementedError
+
+            data = [fixed_value, current_min, current_high]
+            factors.append(pd.Series(data, index=idx, name=name))
+
+        factors_df = pd.DataFrame(factors)
+        logging.info('Saving factor settings to {}'.format(out_file))
+        factors_df.to_csv(out_file)
+
+    def update_factors_from_csv(self, csv_file):
+        factors_df = pd.DataFrame.from_csv(csv_file)
+        logging.info('Reading factor settings from {}'.format(csv_file))
+
+        for name, factor in self.factors.items():
+            logging.info('Updating factor {}'.format(name))
+
+            if issubclass(type(factor), NumericFactor):
+                current_low = factors_df.loc[name]['current_low']
+                current_high = factors_df.loc[name]['current_high']
+                logging.info('Factor: {}. Setting current_low to {}'.format(name, current_low))
+                logging.info('Factor: {}. Setting current_high to {}'.format(name, current_high))
+                factor.current_low = current_low
+                factor.current_high = current_high
+            elif isinstance(factor, CategoricalFactor):
+                if pd.isnull(factors_df.loc[name]['fixed_value']):
+                    fixed_value = None
+                    logging.info('Factor: {}. Had no fixed_value.'.format(name))
+                else:
+                    fixed_value = factors_df.loc[name]['fixed_value']
+                    logging.info('Factor: {}. Setting fixed_value to {}.'.format(name, fixed_value))
+
+                factor.fixed_value = fixed_value
 
     def get_optimal_settings(self, response):
         """
@@ -317,7 +367,7 @@ class ExperimentDesigner:
 
         return results
 
-    def update_factors_from_optimum(self, optimal_experiment, tol=0.25):
+    def update_factors_from_optimum(self, optimal_experiment, tol=0.25, recovery=False):
         """
         Updates the factor settings based on how far the current settings are
         from those supplied in optimal_experiment['factor_settings'].
@@ -339,21 +389,25 @@ class ExperimentDesigner:
         spans = np.array([f.span for f in numeric_factors])
 
         ratios = (optimal_x - centers) / spans
-        logging.debug(
-            'The distance of the factor optimas from the factor centers, '
-            'expressed as the ratio of the step length:\n{}'.format(ratios))
+        if not recovery:
+            logging.debug(
+                'The distance of the factor optimas from the factor centers, '
+                'expressed as the ratio of the step length:\n{}'.format(ratios))
 
         if (abs(ratios) < tol).all():
             converged = True
-            logging.info('Convergence reached.')
+            if not recovery:
+                logging.info('Convergence reached.')
         else:
             converged = False
-            logging.info('Convergence not reached. Moves design.')
+            if not recovery:
+                logging.info('Convergence not reached. Moves design.')
 
             for ratio, name, factor in zip(ratios, numeric_names, numeric_factors):
                 if abs(ratio) < tol:
-                    logging.debug(('Factor {} not updated - within tolerance '
-                                   'limits.').format(name))
+                    if not recovery:
+                        logging.debug(('Factor {} not updated - within tolerance '
+                            'limits.').format(name))
                     continue
 
                 # elif not any(name in param for param in model.params.index):
@@ -361,14 +415,16 @@ class ExperimentDesigner:
                 #                    'in optimal model.').format(name))
                 #     continue
 
-                self._update_numeric_factor(factor, name, ratio)
+                if not recovery:
+                    self._update_numeric_factor(factor, name, ratio)
 
         converged, reached_limits = self._check_convergence(
             centers,
             converged,
             criterion,
             optimal_y,
-            numeric_factors)
+            numeric_factors,
+            recovery=recovery)
 
         optimization_results = pd.Series(
             index=self._design_sheet.columns,
@@ -601,6 +657,10 @@ class ExperimentDesigner:
         self._phase = 'optimization'
         return results
 
+    def set_phase(self, phase):
+        assert phase in self._allowed_phases, 'phase must be one of {}'.format(self._allowed_phases)
+        self._phase = phase
+
     def _update_numeric_factor(self, factor, name, ratio):
         logging.info('Factor {}: Updating settings.'.format(name))
         logging.info('Factor {}: Current settings: {}'.format(name, factor))
@@ -726,7 +786,7 @@ class ExperimentDesigner:
         return self._design_sheet
 
     def _check_convergence(self, centers, converged, criterion, prediction,
-                           numeric_factors):
+                           numeric_factors, recovery=False):
         # It's possible that the optimum is predicted to be at the edge of the allowed
         # min or max factor setting. This will produce a high 'ratio' and the algorithm
         # is not considered to have converged (above). However, in this situation we
@@ -734,8 +794,9 @@ class ExperimentDesigner:
 
         new_centers = np.array([f.center for f in numeric_factors])
         if (centers == new_centers).all():
-            logging.info(
-                'The design has not moved since last iteration. Converged.')
+            if not recovery:
+                logging.info(
+                    'The design has not moved since last iteration. Converged.')
             converged = True
             reached_limits = True
 
