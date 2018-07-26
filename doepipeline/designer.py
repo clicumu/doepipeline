@@ -385,6 +385,10 @@ class ExperimentDesigner:
         optimal_y = optimal_experiment['weighted_response']
         criterion = optimal_experiment['criterion']
 
+        # Get only numeric factors
+        if recovery:
+            optimal_x = optimal_x.iloc[optimal_x.index.isin(numeric_names)]
+
         centers = np.array([f.center for f in numeric_factors])
         spans = np.array([f.span for f in numeric_factors])
 
