@@ -332,7 +332,7 @@ class ExperimentDesigner:
 
         response = response_sheet.copy()
         treated_response, criterion = self.treat_response(
-            response_sheet, perform_transform=False)
+            response, perform_transform=False)
 
         treated_response = treated_response.iloc[:, 0]
         if criterion == 'maximize':
@@ -346,7 +346,7 @@ class ExperimentDesigner:
 
         results = OrderedDict()
         optimal_weighted_response = np.array(treated_response.iloc[optimum_i])
-        optimal_response = response.iloc[optimum_i]
+        optimal_response = response_sheet.iloc[optimum_i]
         results['factor_settings'] = optimum_settings
         results['weighted_response'] = optimal_weighted_response
         results['response'] = optimal_response
@@ -354,9 +354,9 @@ class ExperimentDesigner:
         results['new_best'] = False
         results['old_best'] = self._best_experiment
 
-        has_multiple_responses = response.shape[1] > 1
+        has_multiple_responses = response_sheet.shape[1] > 1
         logging.debug('The best response was found in experiment:\n{}'.format(optimum_settings.name))
-        logging.debug('The response values were:\n{}'.format(response.iloc[optimum_i]))
+        logging.debug('The response values were:\n{}'.format(response_sheet.iloc[optimum_i]))
         if has_multiple_responses:
             logging.debug('The weighed response was:\n{}'.format(treated_response.iloc[optimum_i]))
         logging.debug('Will return optimum settings:\n{}'.format(results['factor_settings']))
