@@ -618,8 +618,12 @@ class ExperimentDesigner:
 
                 # Shrink the span a bit
                 logging.debug('Factor {} span: {}'.format(name, span))
-                logging.debug('Factor {} adjusting span with gsd_span_ratio {}'.format(name, span_ratio))
+                logging.debug('Factor {}: adjusting span with gsd_span_ratio {}'.format(name, span_ratio))
                 span = span * span_ratio
+                if isinstance(factor, OrdinalFactor) and span < 2.0:
+                    # Make sure ordinal factors' spans don't shrink to the point where there's no spread in the exp. design
+                    logging.debug('Factor {}: span ({}) too small, adjusting to minimal span for ordinal factor.'.format(name, span))
+                    span = 2.0
                 logging.debug('Factor {} span: {}'.format(name, span))
 
                 # center around best point
