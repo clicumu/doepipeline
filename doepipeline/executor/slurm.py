@@ -82,7 +82,8 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                 completed_flag_file = os.path.join(current_workdir, job_name + '.completed')
 
                 if os.path.isfile(completed_flag_file) and self.recovery:
-                    logging.info('The pipeline step {} is already completed for experiment {}, skipping.'.format(step_name, exp_name))
+                    logging.info('The pipeline step {} is already completed '
+                                 'for experiment {}, skipping.'.format(step_name, exp_name))
                 else:
                     if slurm_spec is not None:
                         # Create SLURM-compatible batch-script file
@@ -196,7 +197,8 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     # Ugly fix for random segmentation faults that makes it
                     # hard to get through the pipeline:
                     if exit_code == "11:0":
-                        logging.error('Interpreting this as a segmentation fault. Attempting to restart the job.')
+                        logging.error('Interpreting this as a segmentation fault. '
+                                      'Attempting to restart the job.')
                         if job_info['restarts']:
                             self.running_jobs[job_name]['restarts'] -= 1
                             completed_command = self.execute_command(

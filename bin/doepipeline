@@ -9,7 +9,6 @@ import sys
 import logging
 import pandas as pd
 
-from itertools import compress
 from doepipeline.executor import LocalPipelineExecutor, SlurmPipelineExecutor
 from doepipeline.generator import PipelineGenerator
 
@@ -45,16 +44,16 @@ def reduction_argument(value):
     return value
 
 
-def recover_last_iter(basedir, maxiter):
-    iter = 1
-    while iter < maxiter:
-        next_dir = os.path.join(basedir, str(iter))
+def recover_last_iteration(basedir, maxiter):
+    iteration = 1
+    while iteration < maxiter:
+        next_dir = os.path.join(basedir, str(iteration))
         if os.path.isdir(next_dir):
-            iter += 1
+            iteration += 1
             continue
         else:
-            iter -= 1
-            return iter
+            iteration -= 1
+            return iteration
 
 
 def make_parser():
@@ -186,35 +185,46 @@ if __name__ == '__main__':
 
         if recovering:
             basedir = generator.get_base_directory()
-            n_iter = recover_last_iter(basedir, args.maxiter)
-            if n_iter == 0:  # not even the first iteration had begun, nothing to recover.
+            n_iter = recover_last_iteration(basedir, args.maxiter)
+            if n_iter == 0:
+                # not even the first iteration had begun, nothing to recover.
                 n_iter = 1
-            logging.info('Previously, the iteration being executed was {}'.format(n_iter))
-            if n_iter > 1: # no need to do anything if n_iter==1, but otherwise we need to update stuff:
+            logging.info('Previously, the iteration being '
+                         'executed was {}'.format(n_iter))
+            if n_iter > 1:
+                # no need to do anything if n_iter==1, but otherwise we
+                # need to update stuff:
+
                 # update factors to correspond to last iteration
                 # update best run
                 generator.set_current_iteration(n_iter)
                 designer.set_phase('optimization')
 
-                # Recover factor settings from the iteration that failed, and update designer accordingly
+                # Recover factor settings from the iteration that failed,
+                # and update designer accordingly
                 iterdir = os.path.join(basedir, str(n_iter))
                 factors_csv_file = os.path.join(iterdir, 'factor_settings.csv')
-                logging.info('Fetching factor settings from iter {}'.format(n_iter))
+                logging.info('Fetching factor settings '
+                             'from iter {}'.format(n_iter))
                 if os.path.isfile(factors_csv_file):
                     designer.update_factors_from_csv(factors_csv_file)
                 else:
-                    sys.exit('Missing factor_settings.csv file in {}'.format(iterdir))
+                    sys.exit('Missing factor_settings.csv '
+                             'file in {}'.format(iterdir))
 
                 # Recover the best result obtained previously
                 # The design and results from the last completed iteration
                 last_iterdir = os.path.join(basedir, str(n_iter-1))
-                logging.debug('Fetching design and results from last completed iteration (iter {})'.format(n_iter-1))
+                logging.debug('Fetching design and results from last '
+                              'completed iteration (iter {})'.format(n_iter-1))
                 previous_design = pd.DataFrame.from_csv(os.path.join(last_iterdir, 'design.csv'))
                 previous_results = pd.DataFrame.from_csv(os.path.join(last_iterdir, 'results.csv'))
 
                 # The previously best result. Update designer to be aware of it
-                best_results = designer.get_best_experiment(previous_design, previous_results)
-                logging.debug('The best experiment in iter {} was {}'.format(n_iter-1, best_results))
+                best_results = designer.get_best_experiment(previous_design,
+                                                            previous_results)
+                logging.debug('The best experiment in '
+                              'iter {} was {}'.format(n_iter-1, best_results))
                 designer.new_design()  # set up design_sheet within designer
 
                 # Recreate old_optimum
@@ -274,13 +284,16 @@ if __name__ == '__main__':
                 validation_experiment = pd.DataFrame(
                     optimum.predicted_optimum,
                     columns=['validation']).transpose()
-                validation_pipeline = generator.new_pipeline_collection(validation_experiment, validation_run=True)
+                validation_pipeline = generator.new_pipeline_collection(validation_experiment,
+                                                                        validation_run=True)
                 validation_result = executor.run_pipeline_collection(validation_pipeline)
 
-                logging.info('Done with execution of the validation experiment. The result was:\n{}'.format(validation_result))
+                logging.info('Done with execution of the validation '
+                             'experiment. The result was:\n{}'.format(validation_result))
 
                 if validation_result.shape[1] > 1:
-                    combined_response, _ = designer.treat_response(validation_result, perform_transform=False)
+                    combined_response, _ = designer.treat_response(validation_result,
+                                                                   perform_transform=False)
                     logging.info('The combined response was:\n{}'.format(combined_response))
 
                 results = pd.concat([results, validation_result])
@@ -304,7 +317,8 @@ if __name__ == '__main__':
                 optimum = designer.update_factors_from_optimum(optimal_experiment, tol=args.tol)
 
             else:
-                logging.info('Did not find a better response in this iteration compared to the previous one.')
+                logging.info('Did not find a better response in this '
+                             'iteration compared to the previous one.')
                 logging.info('Rolling back to the best result in previous iteration.')
                 optimum = old_optimum
 

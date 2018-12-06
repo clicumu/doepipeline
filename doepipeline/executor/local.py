@@ -38,7 +38,8 @@ class LocalPipelineExecutor(BasePipelineExecutor):
                     logging.info('Job "{}" finished'.format(job_name))
                     # create the flag file for completed step "{job_name}.completed"
                     completed_filename = job_name + '.completed'
-                    self.touch_file(completed_filename, cwd=job_info['exp_workdir'])
+                    self.touch_file(completed_filename,
+                                    cwd=job_info['exp_workdir'])
                     self.running_jobs.pop(job_name)
 
         if still_running:
@@ -48,7 +49,8 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             logging.info('All current jobs finished.')
             return self.JOB_FINISHED, 'no jobs running.'
 
-    def execute_command(self, command, watch=False, wait=False, check=True, attempts=3, **kwargs):
+    def execute_command(self, command, watch=False, wait=False,
+                        check=True, attempts=3, **kwargs):
         """ Execute given command by executing it in subprocess.
 
         Calls are made using `subprocess`-module like::
@@ -131,10 +133,13 @@ class LocalPipelineExecutor(BasePipelineExecutor):
             for script, exp_idx in zip(scripts, experiment_index):
                 current_workdir = os.path.join(self.workdir, str(exp_idx))
                 log_file = self.base_log.format(name=exp_idx, i=i)
-                completed_flag_file = os.path.join(current_workdir, '_'.join([pipeline_step, str(exp_idx)]) + '.completed')
+                completed_flag_file_name = '_'.join([pipeline_step, str(exp_idx)]) + '.completed'
+                completed_flag_file = os.path.join(current_workdir,
+                                                   completed_flag_file_name)
 
                 if os.path.isfile(completed_flag_file) and self.recovery:
-                    logging.info('The pipeline step {} is already completed for experiment {}, skipping.'.format(pipeline_step, exp_idx))
+                    logging.info('The pipeline step {} is already completed '
+                                 'for experiment {}, skipping.'.format(pipeline_step, exp_idx))
                 else:
                     job_name = '_'.join([pipeline_step, str(exp_idx)])
                     try:

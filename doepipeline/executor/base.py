@@ -62,7 +62,8 @@ class BasePipelineExecutor(object):
     JOB_RUNNING = 'job_running'
     JOB_FAILED = 'job_failed'
 
-    def __init__(self, workdir=None, poll_interval=10, base_command=None, base_log=None, recovery_mode=False):
+    def __init__(self, workdir=None, poll_interval=10,
+                 base_command=None, base_log=None, recovery_mode=False):
         assert workdir is None or isinstance(workdir, str) and workdir.strip(),\
             'path must be None or string'
         assert not isinstance(poll_interval, bool) and\

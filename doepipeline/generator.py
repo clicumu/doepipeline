@@ -86,7 +86,8 @@ class PipelineGenerator:
         self._current_iteration = iter
         self._update_working_directory()
 
-    def new_pipeline_collection(self, experiment_design, exp_id_column=None, validation_run=False):
+    def new_pipeline_collection(self, experiment_design,
+                                exp_id_column=None, validation_run=False):
         """ Given experiment, create script-strings to execute.
 
         Parameter settings from experimental design are used to
@@ -111,7 +112,8 @@ class PipelineGenerator:
         pipeline_collection = collections.OrderedDict()
         if not self._setting_up and not validation_run:
             self._current_iteration += 1
-            logging.debug('generator.py: incrementing _current_iteration. Is now {}'.format(self._current_iteration))
+            logging.debug('generator.py: incrementing _current_iteration. '
+                          'Is now {}'.format(self._current_iteration))
             self._update_working_directory()
 
         for i, experiment in experiment_design.iterrows():
@@ -134,7 +136,8 @@ class PipelineGenerator:
                 for factor_name in script_factors:
                     factor_type = self._factors[factor_name].get('type', 'quantitative')
                     factor_value = experiment[factor_name]
-                    replacement[factor_name] = int(factor_value) if factor_type.lower() == 'ordinal' else factor_value
+                    replacement[factor_name] = int(factor_value) if \
+                        factor_type.lower() == 'ordinal' else factor_value
 
                 # Replace the factor placeholders with the factor values
                 script = script.format(**replacement)

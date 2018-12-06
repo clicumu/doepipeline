@@ -285,7 +285,8 @@ class ExperimentDesigner:
             # Find the best screening result and update factors accordingly
             self._screening_response = treated_response
             self._screening_criterion = criterion
-            return self._evaluate_screening(treated_response, criterion, self._gsd_span_ratio)
+            return self._evaluate_screening(treated_response, criterion,
+                                            self._gsd_span_ratio)
         else:
             # Predict optimal parameter settings, but don't update factors
             return self._predict_optimum_settings(treated_response, criterion)
@@ -413,11 +414,6 @@ class ExperimentDesigner:
                         logging.debug(('Factor {} not updated - within tolerance '
                             'limits.').format(name))
                     continue
-
-                # elif not any(name in param for param in model.params.index):
-                #     logging.debug(('Factor {} not updated - not used as factor '
-                #                    'in optimal model.').format(name))
-                #     continue
 
                 if not recovery:
                     self._update_numeric_factor(factor, name, ratio)
@@ -577,7 +573,8 @@ class ExperimentDesigner:
             adjusted_settings = True
 
         if adjusted_settings:
-            logging.debug('Factor {}: Adjusted the proposed new factor settings by {}.'.format(factor_name, nudge))
+            logging.debug('Factor {}: Adjusted the proposed new factor '
+                          'settings by {}.'.format(factor_name, nudge))
             logging.debug('Factor {}: New factor low is {}.'.format(factor_name, low_limit))
             logging.debug('Factor {}: New factor high is {}.'.format(factor_name, high_limit))
 
@@ -618,11 +615,14 @@ class ExperimentDesigner:
 
                 # Shrink the span a bit
                 logging.debug('Factor {} span: {}'.format(name, span))
-                logging.debug('Factor {}: adjusting span with gsd_span_ratio {}'.format(name, span_ratio))
+                logging.debug('Factor {}: adjusting span with '
+                              'gsd_span_ratio {}'.format(name, span_ratio))
                 span = span * span_ratio
                 if isinstance(factor, OrdinalFactor) and span < 2.0:
-                    # Make sure ordinal factors' spans don't shrink to the point where there's no spread in the exp. design
-                    logging.debug('Factor {}: span ({}) too small, adjusting to minimal span for ordinal factor.'.format(name, span))
+                    # Make sure ordinal factors' spans don't shrink to the
+                    # point where there's no spread in the exp. design
+                    logging.debug('Factor {}: span ({}) too small, adjusting '
+                                  'to minimal span for ordinal factor.'.format(name, span))
                     span = 2.0
                 logging.debug('Factor {} span: {}'.format(name, span))
 
