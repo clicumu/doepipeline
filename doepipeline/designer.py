@@ -11,7 +11,7 @@ from doepipeline.model_utils import make_desirability_function, predict_optimum
 
 class OptimizationResult(namedtuple(
     'OptimizationResult', ['predicted_optimum', 'converged',
-                           'tol', 'reached_limits'])):
+                           'tol', 'reached_limits', 'empirically_found'])):
     """ `namedtuple` encapsulating results from optimization. """
 
 
@@ -133,7 +133,7 @@ class ExperimentDesigner:
     def __init__(self, factors, design_type, responses, skip_screening=True,
                  at_edges='distort', relative_step=.25, gsd_reduction='auto',
                  model_selection='brute', n_folds='loo', manual_formula=None,
-                 shrinkage=1.0, q2_limit=0.5):
+                 shrinkage=1.0, q2_limit=0.5, gsd_span_ratio=0.5):
         try:
             assert at_edges in ('distort', 'shrink'),\
                 'unknown action at_edges: {0}'.format(at_edges)
@@ -168,6 +168,7 @@ class ExperimentDesigner:
         self.step_length = relative_step
         self.design_type = design_type
         self.responses = responses
+        self.response_values = None
         self.gsd_reduction = gsd_reduction
         self.model_selection = model_selection
         self.n_folds = n_folds
@@ -175,9 +176,16 @@ class ExperimentDesigner:
         self.q2_limit = q2_limit
         self._formula = manual_formula
         self._edge_action = at_edges
+        self._allowed_phases = ['optimization', 'screening']
         self._phase = 'optimization' if self.skip_screening else 'screening'
         self._n_screening_evaluations = 0
         self._factor_types = factor_types
+        self._gsd_span_ratio = gsd_span_ratio
+        self._stored_transform = lambda x: x
+        self._best_experiment = {
+                'optimal_x': pd.Series([]),
+                'optimal_y': None,
+                'weighted_y': None}
         n = len(self.factors)
         try:
             self._matrix_designers[self.design_type.lower()]
@@ -201,42 +209,318 @@ class ExperimentDesigner:
         else:
             return self._new_optimization_design()
 
-    def update_factors_from_response(self, response, tol=.25):
-        """ Calculate optimal factor settings given response and update
-        factor settings to center around optimum. Returns calculated
+    def write_factor_csv(self, out_file):
+        factors = list()
+        idx = pd.Index(['fixed_value', 'current_low', 'current_high'])
+
+        for name, factor in self.factors.items():
+            current_min = None
+            current_high = None
+            fixed_value = None
+
+            if issubclass(type(factor), NumericFactor):
+                current_min = factor.current_low
+                current_high = factor.current_high
+            elif isinstance(factor, CategoricalFactor):
+                fixed_value = factor.fixed_value
+            else:
+                raise NotImplementedError
+
+            data = [fixed_value, current_min, current_high]
+            factors.append(pd.Series(data, index=idx, name=name))
+
+        factors_df = pd.DataFrame(factors)
+        logging.info('Saving factor settings to {}'.format(out_file))
+        factors_df.to_csv(out_file)
+
+    def update_factors_from_csv(self, csv_file):
+        factors_df = pd.DataFrame.from_csv(csv_file)
+        logging.info('Reading factor settings from {}'.format(csv_file))
+
+        for name, factor in self.factors.items():
+            logging.info('Updating factor {}'.format(name))
+
+            if issubclass(type(factor), NumericFactor):
+                current_low = factors_df.loc[name]['current_low']
+                current_high = factors_df.loc[name]['current_high']
+                logging.info('Factor: {}. Setting current_low to {}'.format(name, current_low))
+                logging.info('Factor: {}. Setting current_high to {}'.format(name, current_high))
+                factor.current_low = current_low
+                factor.current_high = current_high
+            elif isinstance(factor, CategoricalFactor):
+                if pd.isnull(factors_df.loc[name]['fixed_value']):
+                    fixed_value = None
+                    logging.info('Factor: {}. Had no fixed_value.'.format(name))
+                else:
+                    fixed_value = factors_df.loc[name]['fixed_value']
+                    logging.info('Factor: {}. Setting fixed_value to {}.'.format(name, fixed_value))
+
+                factor.fixed_value = fixed_value
+
+    def get_optimal_settings(self, response):
+        """
+        Calculate optimal factor settings given response. Returns calculated
         optimum.
 
-        If several responses are defined, the geometric mean of Derringer
-        and Suich's desirability functions will be used for optimization,
-        see:
+        If the current phase is 'screening': returns the factor settings of
+        the best run and updates the current factor settings.
+
+        If the current phase is 'optimization': returns the factor settings of
+        the predicted optimum, but doesn't update current factor settings in
+        case a validation step is to be run first
+
+        :param pandas.DataFrame response: Response sheet.
+
+        :returns: Calculated optimum.
+        :rtype: OptimizationResult
+        """
+
+        self._response_values = response.copy()
+        response = response.copy()
+
+        # Perform any transformations or weigh together multiple responses:
+        treated_response, criterion = self.treat_response(response)
+
+        if self._phase == 'screening':
+            # Find the best screening result and update factors accordingly
+            self._screening_response = treated_response
+            self._screening_criterion = criterion
+            return self._evaluate_screening(treated_response, criterion,
+                                            self._gsd_span_ratio)
+        else:
+            # Predict optimal parameter settings, but don't update factors
+            return self._predict_optimum_settings(treated_response, criterion)
+
+    def _update_best_experiment(self, result):
+        update = False
+        if self._best_experiment['optimal_x'].empty:
+            update = True
+        elif result['criterion'] == 'maximize':
+            if result['weighted_response'] > self._best_experiment['weighted_y']:
+                update = True
+        elif result['criterion'] == 'minimize':
+            if result['weighted_response'] < self._best_experiment['weighted_y']:
+                update = True
+        if update:
+            self._best_experiment['optimal_x'] = result['factor_settings']
+            self._best_experiment['optimal_y'] = result['response']
+            self._best_experiment['weighted_y'] = result['weighted_response']
+
+        return update
+
+    def get_best_experiment(self, experimental_sheet, response_sheet, use_index=1):
+        """
+        Accepts an experimental design and the corresponding response values.
+
+        Finds the best experiment and updates self._best_experiment.
+
+        Returns the best experiment, to be used in fnc update_factors_from_optimum
+        """
+        assert isinstance(experimental_sheet, pd.core.frame.DataFrame), \
+            'The input experimental sheet must be a pandas DataFrame'
+        assert isinstance(response_sheet, pd.core.frame.DataFrame), \
+            'The input response sheet must be a pandas DataFrame'
+        assert sorted(experimental_sheet.columns) == sorted(self.factors), \
+            'The factors of the experimental sheet must match those in the \
+            pipeline. You input:\n{}\nThey should be:\n{}'.format(
+                list(experimental_sheet.columns),
+                list(self.factors.keys()))
+        assert sorted(response_sheet.columns) == sorted(self.responses), \
+            'The responses of the response sheet must match those in the \
+            pipeline. You input:\n{}\nThey should be:\n{}'.format(
+                list(response_sheet.columns),
+                list(self.responses.keys()))
+
+        response = response_sheet.copy()
+        treated_response, criterion = self.treat_response(
+            response, perform_transform=False)
+
+        treated_response = treated_response.iloc[:, 0]
+        if criterion == 'maximize':
+            optimum_i = treated_response.argsort().iloc[-use_index]
+        elif criterion == 'minimize':
+            optimum_i = treated_response.argsort().iloc[use_index - 1]
+        else:
+            raise NotImplementedError
+
+        optimum_settings = experimental_sheet.iloc[optimum_i]
+
+        results = OrderedDict()
+        optimal_weighted_response = np.array(treated_response.iloc[optimum_i])
+        optimal_response = response_sheet.iloc[optimum_i]
+        results['factor_settings'] = optimum_settings
+        results['weighted_response'] = optimal_weighted_response
+        results['response'] = optimal_response
+        results['criterion'] = criterion
+        results['new_best'] = False
+        results['old_best'] = self._best_experiment
+
+        has_multiple_responses = response_sheet.shape[1] > 1
+        logging.debug('The best response was found in experiment:\n{}'.format(optimum_settings.name))
+        logging.debug('The response values were:\n{}'.format(response_sheet.iloc[optimum_i]))
+        if has_multiple_responses:
+            logging.debug('The weighed response was:\n{}'.format(treated_response.iloc[optimum_i]))
+        logging.debug('Will return optimum settings:\n{}'.format(results['factor_settings']))
+        logging.debug('And best response:\n{}'.format(results['response']))
+
+        if self._update_best_experiment(results):
+            results['new_best'] = True
+
+        return results
+
+    def update_factors_from_optimum(self, optimal_experiment, tol=0.25, recovery=False):
+        """
+        Updates the factor settings based on how far the current settings are
+        from those supplied in optimal_experiment['factor_settings'].
+
+        :param OrderedDict optimal_experiment: Output from get_best_experiment
+        :param float tol: Accepted relative distance to design space edge.
+        :returns: Calculated optimum.
+        :rtype: OptimizationResult
+        """
+        are_numeric = np.array(self._factor_types) != 'categorical'
+        numeric_names = np.array(list(self.factors.keys()))[are_numeric]
+        numeric_factors = np.array(list(self.factors.values()))[are_numeric]
+
+        optimal_x = optimal_experiment['factor_settings']
+        optimal_y = optimal_experiment['weighted_response']
+        criterion = optimal_experiment['criterion']
+
+        # Get only numeric factors
+        if recovery:
+            optimal_x = optimal_x.iloc[optimal_x.index.isin(numeric_names)]
+
+        centers = np.array([f.center for f in numeric_factors])
+        spans = np.array([f.span for f in numeric_factors])
+
+        ratios = (optimal_x - centers) / spans
+        if not recovery:
+            logging.debug(
+                'The distance of the factor optimas from the factor centers, '
+                'expressed as the ratio of the step length:\n{}'.format(ratios))
+
+        if (abs(ratios) < tol).all():
+            converged = True
+            if not recovery:
+                logging.info('Convergence reached.')
+        else:
+            converged = False
+            if not recovery:
+                logging.info('Convergence not reached. Moves design.')
+
+            for ratio, name, factor in zip(ratios, numeric_names, numeric_factors):
+                if abs(ratio) < tol:
+                    if not recovery:
+                        logging.debug(('Factor {} not updated - within tolerance '
+                            'limits.').format(name))
+                    continue
+
+                if not recovery:
+                    self._update_numeric_factor(factor, name, ratio)
+
+        converged, reached_limits = self._check_convergence(
+            centers,
+            converged,
+            criterion,
+            optimal_y,
+            numeric_factors,
+            recovery=recovery)
+
+        optimization_results = pd.Series(
+            index=self._design_sheet.columns,
+            dtype=object)
+
+        for name, factor in self.factors.items():
+            if isinstance(factor, CategoricalFactor):
+                optimization_results[name] = factor.fixed_value
+            else:
+                optimization_results[name] = optimal_x[name]
+
+        results = OptimizationResult(
+            optimization_results,
+            converged,
+            tol,
+            reached_limits,
+            empirically_found=True)
+
+        return results
+
+    def _predict_optimum_settings(self, response, criterion):
+        """
+        Calculate a model from the response and find the optimum.
+
+        :returns: Calculated optimum.
+        :rtype: OptimizationResult
+        """
+        logging.info('Predicting optimum')
+
+        are_numeric = np.array(self._factor_types) != 'categorical'
+        numeric_names = np.array(list(self.factors.keys()))[are_numeric]
+
+        optimal_x, model, prediction = predict_optimum(
+            self._design_sheet.loc[:, are_numeric],
+            response.iloc[:, 0].values,
+            numeric_names,
+            criterion=criterion,
+            n_folds=self.n_folds,
+            model_selection=self.model_selection,
+            manual_formula=self._formula,
+            q2_limit=self.q2_limit)
+
+        optimization_results = pd.Series(
+            index=self._design_sheet.columns,
+            dtype=object)
+        if not optimal_x.empty:
+            # If Q2 of model was above the limit and if an optimum was found
+            for name, factor in self.factors.items():
+                if isinstance(factor, CategoricalFactor):
+                    optimization_results[name] = factor.fixed_value
+                elif isinstance(factor, OrdinalFactor):
+                    optimization_results[name] = int(np.round(optimal_x[name]))
+                else:
+                    optimization_results[name] = optimal_x[name]
+
+        result = OptimizationResult(
+            optimization_results,
+            converged=False,
+            tol=0,
+            reached_limits=False,
+            empirically_found=False)
+
+        return result
+
+    def treat_response(self, response, perform_transform=True):
+        """
+        Perform any specified transformations on the response.
+
+        If several responses are defined, combine them into one. The geometric
+        mean of Derringer and Suich's desirability functions will be used for
+        optimization, see:
 
         Derringer, G., and Suich, R., (1980), "Simultaneous Optimization
         of Several Response Variables," Journal of Quality Technology, 12,
         4, 214-219.
 
-        :param pandas.DataFrame response: Response sheet.
-        :param int degree: Degree of polynomial to fit.
-        :param float tol: Accepted relative distance to design space edge.
-        :returns: Calculated optimum.
-        :rtype: OptimizationResult
+        Returns a single response variable and the associated maximize/minimize
+        criterion.
         """
-        response = response.copy()
+
         has_multiple_responses = response.shape[1] > 1
         for name, spec in self.responses.items():
             transform = spec.get('transform', None)
             response_values = response[name]
-
-            if transform == 'log':
-                logging.debug('Log-transforms response {}'.format(name))
-                response_values = np.log(response_values)
-                self._stored_transform = np.log
-            elif transform == 'box-cox':
-                response_values, lambda_ = scipy.stats.boxcox(response_values)
-                logging.debug('Box-cox transformed response {} '
-                              '(lambda={:.4f})'.format(name, lambda_))
-                self._stored_transform = _make_stored_boxcox(lambda_)
-            else:
-                self._stored_transform = lambda x: x
+            if perform_transform:
+                if transform == 'log':
+                    logging.debug('Log-transforming response {}'.format(name))
+                    response_values = np.log(response_values)
+                    self._stored_transform = np.log
+                elif transform == 'box-cox':
+                    response_values, lambda_ = scipy.stats.boxcox(response_values)
+                    logging.debug('Box-cox transforming response {} '
+                                  '(lambda={:.4f})'.format(name, lambda_))
+                    self._stored_transform = _make_stored_boxcox(lambda_)
+                else:
+                    self._stored_transform = lambda x: x
 
             if has_multiple_responses:
                 desirability_function = self._desirabilites[name]
@@ -245,8 +529,6 @@ class ExperimentDesigner:
             response[name] = response_values
 
         if has_multiple_responses:
-            logging.info(('Multiple response, combines using '
-                          'geometric mean of desirability functions'))
             response = np.power(response.product(axis=1), (1 / response.shape[1]))
             response = response.to_frame('combined_response')
             criterion = 'maximize'
@@ -254,12 +536,7 @@ class ExperimentDesigner:
         else:
             criterion = list(self.responses.values())[0]['criterion']
 
-        if self._phase == 'screening':
-            self._screening_response = response
-            self._screening_criterion = criterion
-            return self._evaluate_screening(response, criterion)
-        else:
-            return self._evaluate_optimization(response, tol, criterion)
+        return response, criterion
 
     def reevaluate_screening(self):
         if self._screening_response is None:
@@ -267,87 +544,55 @@ class ExperimentDesigner:
 
         return self._evaluate_screening(self._screening_response,
                                         self._screening_criterion,
+                                        self._gsd_span_ratio,
                                         self._n_screening_evaluations + 1)
 
-    def _evaluate_optimization(self, response, tol, criterion):
-        # Find predicted optimal factor setting.
-        logging.info('Finds optimal model')
+    def _validate_new_factor_limits(self, factor, factor_name, low_limit, high_limit):
+        # If the proposed step change takes us below or above min and max:
+        logging.debug('Factor {}: Proposed new factor low is {}.'
+            .format(factor_name, low_limit))
+        logging.debug('Factor {}: Proposed new factor high is {}.'
+            .format(factor_name, high_limit))
+        adjusted_settings = False
+        if low_limit < factor.min:
+            nudge = abs(low_limit - factor.min)
+            logging.debug(
+                'Factor {}: Minimum allowed setting ({}) would be exceeded by '
+                'the proposed new factor low.'.format(factor_name, factor.min))
+            low_limit += nudge
+            high_limit += nudge
+            adjusted_settings = True
 
-        are_numeric = np.array(self._factor_types) != 'categorical'
-        numeric_names = np.array(list(self.factors.keys()))[are_numeric]
-        numeric_factors = np.array(list(self.factors.values()))[are_numeric]
+        elif high_limit > factor.max:
+            nudge = abs(high_limit - factor.max)
+            logging.debug(
+                'Factor {}: Maximum allowed setting ({}) would be exceeded by '
+                'the proposed new factor high.'.format(factor_name, factor.max))
+            low_limit -= nudge
+            high_limit -= nudge
+            adjusted_settings = True
 
-        optimal_x, model, prediction = predict_optimum(self._design_sheet.loc[:, are_numeric],
-                                                       response.iloc[:, 0].values,
-                                                       numeric_names,
-                                                       criterion=criterion,
-                                                       n_folds=self.n_folds,
-                                                       model_selection=self.model_selection,
-                                                       manual_formula=self._formula,
-                                                       q2_limit=self.q2_limit)
+        if adjusted_settings:
+            logging.debug('Factor {}: Adjusted the proposed new factor '
+                          'settings by {}.'.format(factor_name, nudge))
+            logging.debug('Factor {}: New factor low is {}.'.format(factor_name, low_limit))
+            logging.debug('Factor {}: New factor high is {}.'.format(factor_name, high_limit))
 
-        # Update factors around predicted optimal settings, but keep
-        # the same span as previously.
-        centers = np.array([f.center for f in numeric_factors])
-        spans = np.array([f.span for f in numeric_factors])
+        return (low_limit, high_limit)
 
-        ratios = (optimal_x - centers) / spans
-        logging.debug(
-            'The distance of the factor optimas from the factor centers, '
-            'expressed as the ratio of the step length:\n{}'.format(ratios)
-        )
-
-        if (abs(ratios) < tol).all():
-            converged = True
-            logging.info('Convergence reached.')
-        else:
-            converged = False
-            logging.info('Convergence not reached. Moves design.')
-
-            for ratio, name, factor in zip(ratios, numeric_names, numeric_factors):
-                if abs(ratio) < tol:
-                    logging.debug(('Factor {} not updated - within tolerance '
-                                   'limits.').format(name))
-                    continue
-
-                elif not any(name in param for param in model.params.index):
-                    logging.debug(('Factor {} not updated - not used as factor '
-                                   'in optimal model.').format(name))
-                    continue
-
-                self._update_numeric_factor(factor, name, ratio)
-
-        converged, reached_limits = self._check_convergence(centers,
-                                                            converged,
-                                                            criterion,
-                                                            prediction,
-                                                            numeric_factors)
-
-        optimization_results = pd.Series(index=self._design_sheet.columns,
-                                         dtype=object)
-        for name, factor in self.factors.items():
-            if isinstance(factor, CategoricalFactor):
-                optimization_results[name] = factor.fixed_value
-            else:
-                optimization_results[name] = optimal_x[name]
-        results = OptimizationResult(optimization_results, converged,
-                                     tol, reached_limits)
-
-        logging.info('Predicted optimum:\n{}'.format(
-            results.predicted_optimum))
-
-        return results
-
-    def _evaluate_screening(self, response, criterion, use_index=1):
+    def _evaluate_screening(self, response, criterion, span_ratio, use_index=1):
+        """
+        :param float span_ratio: The ratio of the span between gsd points that will be used in the following optimization design.
+        """
         self._n_screening_evaluations += 1
 
-        logging.info('Evaluates screening results.')
-        response = response.iloc[:, 0]
+        logging.info('Evaluating screening results.')
+        response_series = response.iloc[:, 0]
         factor_items = sorted(self.factors.items())
         if criterion == 'maximize':
-            optimum_i = response.argsort().iloc[-use_index]
+            optimum_i = response_series.argsort().iloc[-use_index]
         elif criterion == 'minimize':
-            optimum_i = response.argsort().iloc[use_index - 1]
+            optimum_i = response_series.argsort().iloc[use_index - 1]
         else:
             raise NotImplementedError
 
@@ -366,27 +611,63 @@ class ExperimentDesigner:
 
                 min_ = factor_levels[max([0, factor_level - 1])]
                 max_ = factor_levels[min([factor_level + 1, len(factor_levels) - 1])]
+                span = max_ - min_
+
+                # Shrink the span a bit
+                logging.debug('Factor {} span: {}'.format(name, span))
+                logging.debug('Factor {}: adjusting span with '
+                              'gsd_span_ratio {}'.format(name, span_ratio))
+                span = span * span_ratio
+                if isinstance(factor, OrdinalFactor) and span < 2.0:
+                    # Make sure ordinal factors' spans don't shrink to the
+                    # point where there's no spread in the exp. design
+                    logging.debug('Factor {}: span ({}) too small, adjusting '
+                                  'to minimal span for ordinal factor.'.format(name, span))
+                    span = 2.0
+                logging.debug('Factor {} span: {}'.format(name, span))
+
+                # center around best point
+                best_point = factor_levels[factor_level]
+                new_low = best_point - span/2
+                new_high = best_point + span/2
 
                 if isinstance(factor, OrdinalFactor):
-                    min_ = int(np.round(min_))
-                    max_ = int(np.round(max_))
+                    new_low = int(np.round(new_low))
+                    new_high = int(np.round(new_high))
 
-                factor.current_low = min_
-                factor.current_high = max_
+                # nudge new high and low so we don't exceed the limits
+                new_low, new_high = self._validate_new_factor_limits(
+                    factor, name, new_low, new_high)
+
+                # update factors
+                factor.current_low = new_low
+                factor.current_high = new_high
 
             optimum_settings[name] = factor_levels[factor_level]
-            logging.debug('New factor setting, {}: {}'.format(name, factor))
+            logging.info('New settings for factor {}:\n{}'.format(
+                name, factor))
 
         results = OptimizationResult(
-            pd.Series(optimum_settings), converged=False, tol=0,
-            reached_limits=False
-        )
+            pd.Series(optimum_settings),
+            converged=False,
+            tol=0,
+            reached_limits=False,
+            empirically_found=True)
 
-        logging.info('Best screening result:\n{}'.format(
-            results.predicted_optimum))
+        logging.info('Best screening result was exp no {}'.format(optimum_i))
+        logging.info('The corresponding response was:\n{}'.format(self._response_values.iloc[optimum_i]))
+        if len(self._response_values.columns) > 1:
+            logging.info('The combined response was:\n{}'.format(response.iloc[optimum_i]))
+        logging.info('The factor settings were:\n{}'.format(results.predicted_optimum))
 
+        # update current best experiment
+        self.get_best_experiment(self._design_sheet, self._response_values if len(self._response_values.columns) > 1 else response)
         self._phase = 'optimization'
         return results
+
+    def set_phase(self, phase):
+        assert phase in self._allowed_phases, 'phase must be one of {}'.format(self._allowed_phases)
+        self._phase = phase
 
     def _update_numeric_factor(self, factor, name, ratio):
         logging.info('Factor {}: Updating settings.'.format(name))
@@ -412,36 +693,11 @@ class ExperimentDesigner:
             raise NotImplementedError
 
         # If the proposed step change takes us below or above min and max:
-        logging.debug('Factor {}: Proposed new factor low is {}.'
-            .format(name, current_low_new))
-        logging.debug('Factor {}: Proposed new factor high is {}.'
-            .format(name, current_high_new))
-        adjusted_settings = False
-        if current_low_new < factor.min:
-            nudge = abs(current_low_new - factor.min)
-            logging.debug(
-                'Factor {}: Minimum allowed setting ({}) would be exceeded by '
-                'the proposed new factor low.'.format(name, factor.min))
-            current_low_new += nudge
-            current_high_new += nudge
-            adjusted_settings = True
+        new_low, new_high = self._validate_new_factor_limits(
+            factor, name, current_low_new, current_high_new)
 
-        elif current_high_new > factor.max:
-            nudge = abs(current_high_new - factor.max)
-            logging.debug(
-                'Factor {}: Maximum allowed setting ({}) would be exceeded by '
-                'the proposed new factor high.'.format(name, factor.max))
-            current_low_new -= nudge
-            current_high_new -= nudge
-            adjusted_settings = True
-
-        if adjusted_settings:
-            logging.debug('Factor {}: Adjusted the proposed new factor settings by {}.'.format(name, nudge))
-            logging.debug('Factor {}: New factor low is {}.'.format(name, current_low_new))
-            logging.debug('Factor {}: New factor high is {}.'.format(name, current_high_new))
-
-        factor.current_low = current_low_new
-        factor.current_high = current_high_new
+        factor.current_low = new_low
+        factor.current_high = new_high
         logging.info('Factor {}: New settings: {}'.format(name, factor))
         logging.info('Factor {}: Done updating.'.format(name))
 
@@ -538,7 +794,7 @@ class ExperimentDesigner:
         return self._design_sheet
 
     def _check_convergence(self, centers, converged, criterion, prediction,
-                           numeric_factors):
+                           numeric_factors, recovery=False):
         # It's possible that the optimum is predicted to be at the edge of the allowed
         # min or max factor setting. This will produce a high 'ratio' and the algorithm
         # is not considered to have converged (above). However, in this situation we
@@ -546,8 +802,9 @@ class ExperimentDesigner:
 
         new_centers = np.array([f.center for f in numeric_factors])
         if (centers == new_centers).all():
-            logging.info(
-                'The design has not moved since last iteration. Converged.')
+            if not recovery:
+                logging.info(
+                    'The design has not moved since last iteration. Converged.')
             converged = True
             reached_limits = True
 

@@ -25,8 +25,9 @@ class LocalPipelineExecutor(BasePipelineExecutor):
 
     def poll_jobs(self):
         still_running = list()
-        for job_name, process in dict(self.running_jobs).items():
+        for job_name, job_info in dict(self.running_jobs).items():
             logging.debug('Polls "{}"'.format(job_name))
+            process = job_info['pid']
             if process.poll() is None:
                 still_running.append(job_name)
             else:
@@ -35,16 +36,21 @@ class LocalPipelineExecutor(BasePipelineExecutor):
                     return self.JOB_FAILED, '{} has failed'.format(job_name)
                 else:
                     logging.info('Job "{}" finished'.format(job_name))
+                    # create the flag file for completed step "{job_name}.completed"
+                    completed_filename = job_name + '.completed'
+                    self.touch_file(completed_filename,
+                                    cwd=job_info['exp_workdir'])
                     self.running_jobs.pop(job_name)
 
         if still_running:
             msg = '{} still running'.format(', '.join(map(str, still_running)))
             return self.JOB_RUNNING, msg
         else:
-            logging.info('All jobs finished.')
+            logging.info('All current jobs finished.')
             return self.JOB_FINISHED, 'no jobs running.'
 
-    def execute_command(self, command, watch=False, wait=False, check=True, attempts=1, **kwargs):
+    def execute_command(self, command, watch=False, wait=False,
+                        check=True, attempts=3, **kwargs):
         """ Execute given command by executing it in subprocess.
 
         Calls are made using `subprocess`-module like::
@@ -58,13 +64,17 @@ class LocalPipelineExecutor(BasePipelineExecutor):
         super(LocalPipelineExecutor, self).execute_command(command, watch,
                                                            **kwargs)
         job_name = kwargs.pop('job_name', None)
+        workdir = kwargs.get('cwd', '.')
         if watch:
             try:
                 process = subprocess.Popen(command, shell=True, **kwargs)
             except OSError as e:
                 raise CommandError(str(e))
 
-            self.running_jobs[job_name] = process
+            self.running_jobs[job_name] = {
+                'pid': process,
+                'exp_workdir': workdir
+            }
             if wait:
                 process.wait()
         else:
@@ -82,7 +92,7 @@ class LocalPipelineExecutor(BasePipelineExecutor):
                     return completed_process
                 except subprocess.CalledProcessError as e:
                     logging.error('Command failed:\n"{}"'.format(command))
-                    logging.error('Output from subprocess.run():\n{}'.format(completed_process))
+                    logging.error('Output from subprocess.run():\n{}'.format(e))
                     if attempts:
                         logging.error('Retrying...')
                         continue
@@ -117,36 +127,47 @@ class LocalPipelineExecutor(BasePipelineExecutor):
         assert isinstance(job_steps, OrderedDict), 'job_steps must be ordered'
         self.set_env_variables(env_variables)
 
-        for i, step in enumerate(job_steps.values(), start=1):
-            logging.info('Starts pipeline step: {}'.format(step))
-            for script, job_name in zip(step, experiment_index):
-                current_workdir = os.path.join(self.workdir, str(job_name))
+        for i, pipeline_step in enumerate(job_steps, start=1):
+            logging.info('Starts pipeline step: {}'.format(pipeline_step))
+            scripts = job_steps[pipeline_step]
+            for script, exp_idx in zip(scripts, experiment_index):
+                current_workdir = os.path.join(self.workdir, str(exp_idx))
+                log_file = self.base_log.format(name=exp_idx, i=i)
+                completed_flag_file_name = '_'.join([pipeline_step, str(exp_idx)]) + '.completed'
+                completed_flag_file = os.path.join(current_workdir,
+                                                   completed_flag_file_name)
 
-                log_file = self.base_log.format(name=job_name, i=i)
-
-                try:
-                    command = self.base_command.format(script=script)
-                except KeyError:
-                    has_log = True
-                    command = self.base_command.format(script=script,
-                                                       logfile=log_file)
+                if os.path.isfile(completed_flag_file) and self.recovery:
+                    logging.info('The pipeline step {} is already completed '
+                                 'for experiment {}, skipping.'.format(pipeline_step, exp_idx))
                 else:
-                    has_log = False
+                    job_name = '_'.join([pipeline_step, str(exp_idx)])
+                    try:
+                        command = self.base_command.format(script=script)
+                    except KeyError:
+                        has_log = True
+                        command = self.base_command.format(script=script,
+                                                           logfile=log_file)
+                    else:
+                        has_log = False
 
-                if has_log:
-                    self.touch_file(log_file)
-                try:
-                    self.execute_command(command, wait=self.run_serial,
-                                         watch=True, job_name=job_name,
-                                         cwd=current_workdir)
-                except CommandError as e:
-                    raise PipelineRunFailed(str(e))
+                    if has_log:
+                        self.touch_file(log_file)
+                    try:
+                        self.execute_command(command, wait=self.run_serial,
+                                             watch=True, job_name=job_name,
+                                             cwd=current_workdir)
+                    except CommandError as e:
+                        raise PipelineRunFailed(str(e))
 
             self.wait_until_current_jobs_are_finished()
-            logging.info('Pipeline step finished: {}'.format(step))
+            logging.info('Pipeline step finished: {}'.format(pipeline_step))
 
     def make_dir(self, dir, **kwargs):
         logging.debug('Make directory: {} (kwargs {})'.format(dir, kwargs))
+        if os.path.isdir(dir):
+            logging.warning('Directory already exists. {}'.format(dir))
+            return
         try:
             os.makedirs(dir, **kwargs)
         except (OSError, FileExistsError) as e:

@@ -1,6 +1,7 @@
 import re
 import collections
 import os
+import logging
 
 import yaml
 import numpy as np
@@ -51,6 +52,7 @@ class PipelineGenerator:
 
     def _update_working_directory(self):
         workdir = os.path.join(self._config.get('base_directory', '.'), str(self._current_iteration))
+        logging.debug('New working directory: {}'.format(workdir))
         self._config['working_directory'] = workdir
 
     @classmethod
@@ -77,7 +79,15 @@ class PipelineGenerator:
         responses = self._config['design']['responses']
         return designer_class(factors, design_type, responses, *args, **kwargs)
 
-    def new_pipeline_collection(self, experiment_design, exp_id_column=None):
+    def get_base_directory(self):
+        return self._config['base_directory']
+
+    def set_current_iteration(self, iter):
+        self._current_iteration = iter
+        self._update_working_directory()
+
+    def new_pipeline_collection(self, experiment_design,
+                                exp_id_column=None, validation_run=False):
         """ Given experiment, create script-strings to execute.
 
         Parameter settings from experimental design are used to
@@ -100,8 +110,10 @@ class PipelineGenerator:
         :rtype: collections.OrderedDict
         """
         pipeline_collection = collections.OrderedDict()
-        if not self._setting_up:
+        if not self._setting_up and not validation_run:
             self._current_iteration += 1
+            logging.debug('generator.py: incrementing _current_iteration. '
+                          'Is now {}'.format(self._current_iteration))
             self._update_working_directory()
 
         for i, experiment in experiment_design.iterrows():
@@ -124,7 +136,8 @@ class PipelineGenerator:
                 for factor_name in script_factors:
                     factor_type = self._factors[factor_name].get('type', 'quantitative')
                     factor_value = experiment[factor_name]
-                    replacement[factor_name] = int(factor_value) if factor_type.lower() == 'ordinal' else factor_value
+                    replacement[factor_name] = int(factor_value) if \
+                        factor_type.lower() == 'ordinal' else factor_value
 
                 # Replace the factor placeholders with the factor values
                 script = script.format(**replacement)
@@ -140,6 +153,7 @@ class PipelineGenerator:
         pipeline_collection['JOBNAMES'] = self._config['pipeline']
 
         if self._setting_up:
+            logging.debug('generator.py: _setting_up = False')
             self._setting_up = False
 
         jobs = [self._config[name] for name in self._config['pipeline']]
@@ -331,4 +345,3 @@ def _validate_setup_scrip_config(config_dict, valid_before):
             assert all(isinstance(value, str) for value \
                        in before['environment_variables'].values()), \
                 'environment_variables values must be strings'
-

@@ -74,61 +74,70 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
             else:
                 command_step = 'nohup {script} 2>&1 & echo $!'
 
+            logging.info('Starts pipeline step: {}'.format(step_name))
+
             for exp_name, script in zip(experiment_index, step):
                 current_workdir = os.path.join(self.workdir, str(exp_name))
                 job_name = '{0}_exp_{1}'.format(step_name, exp_name)
+                completed_flag_file = os.path.join(current_workdir, job_name + '.completed')
 
-                if slurm_spec is not None:
-                    # Create SLURM-compatible batch-script file
-                    # with current command.
-                    batch_file = '{name}.sh'.format(name=job_name)
-                    flag_lines = '\n'.join('#SBATCH {f}'.format(f=flag)
+                if os.path.isfile(completed_flag_file) and self.recovery:
+                    logging.info('The pipeline step {} is already completed '
+                                 'for experiment {}, skipping.'.format(step_name, exp_name))
+                else:
+                    if slurm_spec is not None:
+                        # Create SLURM-compatible batch-script file
+                        # with current command.
+                        batch_file = '{name}.sh'.format(name=job_name)
+                        flag_lines = '\n'.join('#SBATCH {f}'.format(f=flag)
                                            for flag in flags)
 
-                    file_script = "echo '#!/bin/sh\n{flags}\n{cmd}\n' > {batch_file}".format(
-                        cmd=script, batch_file=batch_file, flags=flag_lines
-                    )
+                        file_script = "echo '#!/bin/sh\n{flags}\n{cmd}\n' > {batch_file}".format(
+                            cmd=script, batch_file=batch_file, flags=flag_lines
+                        )
 
-                    self.touch_file(batch_file, cwd=current_workdir)
-                    self.execute_command(file_script, job_name=exp_name, cwd=current_workdir)
+                        self.touch_file(batch_file, cwd=current_workdir)
+                        self.execute_command(file_script, job_name=exp_name, cwd=current_workdir)
 
-                    command = command_step.format(script=batch_file)
+                        command = command_step.format(script=batch_file)
 
-                    # A little ugly work-around. Other executors watch the PID
-                    # of the running process when executed with watch-keyword.
-                    # To avoid this behaviour the job-name provided to SLURM is
-                    # saved but the command is executed without setting watch
-                    # to True.
-                    completed_command = self.execute_command(
-                        command,
-                        job_name=exp_name,
-                        cwd=current_workdir)
+                        # A little ugly work-around. Other executors watch the PID
+                        # of the running process when executed with watch-keyword.
+                        # To avoid this behaviour the job-name provided to SLURM is
+                        # saved but the command is executed without setting watch
+                        # to True.
+                        completed_command = self.execute_command(
+                            command,
+                            job_name=exp_name,
+                            cwd=current_workdir)
 
-                    job_id = completed_command.stdout.strip().split()[-1].decode(self.encoding)
-                    self.running_jobs[job_name] = {
-                        'id': job_id,
-                        'running_at_slurm': True,
-                        'restarts': 2,
-                        'command': command,
-                        'exp_workdir': current_workdir,
-                        'exp_name': exp_name
-                    }
+                        job_id = completed_command.stdout.strip().split()[-1].decode(self.encoding)
+                        self.running_jobs[job_name] = {
+                            'id': job_id,
+                            'running_at_slurm': True,
+                            'restarts': 2,
+                            'command': command,
+                            'exp_workdir': current_workdir,
+                            'exp_name': exp_name
+                        }
 
-                else:
-                    # Jobs not running at SLURM are simply executed and
-                    # pids are stored.
-                    command = command_step.format(script=script)
-                    completed_command = self.execute_command(
-                        command,
-                        job_name=exp_name,
-                        cwd=current_workdir)
-                    job_id = completed_command.stdout.strip().decode(self.encoding)
-                    self.running_jobs[job_name] = {
-                        'id': job_id,
-                        'running_at_slurm': False
-                    }
+                    else:
+                        # Jobs not running at SLURM are simply executed and
+                        # pids are stored.
+                        command = command_step.format(script=script)
+                        completed_command = self.execute_command(
+                            command,
+                            job_name=exp_name,
+                            cwd=current_workdir)
+                        job_id = completed_command.stdout.strip().decode(self.encoding)
+                        self.running_jobs[job_name] = {
+                            'id': job_id,
+                            'running_at_slurm': False,
+                            'exp_workdir': current_workdir
+                        }
 
             self.wait_until_current_jobs_are_finished()
+            logging.info('Pipeline step finished: {}'.format(step_name))
 
     def poll_jobs(self):
         """ Check job statuses.
@@ -171,6 +180,9 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
 
                 if state == 'COMPLETED':
                     logging.info('{0} finished'.format(job_name))
+                    # create the flag file for completed step "{job_name}.completed"
+                    completed_filename = job_name + '.completed'
+                    self.touch_file(completed_filename, cwd=job_info['exp_workdir'])
                     self.running_jobs.pop(job_name)
 
                 elif state in FAIL_JOB_STATUS:
@@ -185,7 +197,8 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                     # Ugly fix for random segmentation faults that makes it
                     # hard to get through the pipeline:
                     if exit_code == "11:0":
-                        logging.error('Interpreting this as a segmentation fault. Attempting to restart the job.')
+                        logging.error('Interpreting this as a segmentation fault. '
+                                      'Attempting to restart the job.')
                         if job_info['restarts']:
                             self.running_jobs[job_name]['restarts'] -= 1
                             completed_command = self.execute_command(
@@ -223,6 +236,12 @@ class SlurmPipelineExecutor(LocalPipelineExecutor):
                 status = stdout.strip()
                 if not status or 'done' in status.lower():
                     logging.info('{0} finished'.format(job_name))
+                    # create the flag file for completed step "{job_name}.completed"
+                    completed_filename = job_name + '.completed'
+                    cmd = 'touch {}'.format(completed_filename)
+                    completed_command = self.execute_command(
+                        cmd, cwd=job_info['exp_workdir']
+                    )
                     self.running_jobs.pop(job_name)
                 elif 'exit' in status.lower():
                     msg = '{0} has failed'.format(job_name)

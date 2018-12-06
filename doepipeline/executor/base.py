@@ -62,7 +62,8 @@ class BasePipelineExecutor(object):
     JOB_RUNNING = 'job_running'
     JOB_FAILED = 'job_failed'
 
-    def __init__(self, workdir=None, poll_interval=10, base_command=None, base_log=None):
+    def __init__(self, workdir=None, poll_interval=10,
+                 base_command=None, base_log=None, recovery_mode=False):
         assert workdir is None or isinstance(workdir, str) and workdir.strip(),\
             'path must be None or string'
         assert not isinstance(poll_interval, bool) and\
@@ -86,6 +87,7 @@ class BasePipelineExecutor(object):
             self.base_log = '{name}_step_{i}.log'
 
         self.is_setting_up = True
+        self.recovery = recovery_mode
         self.workdir = workdir if workdir is not None else '.'
         self.poll_interval = poll_interval
         self.running_jobs = dict()
@@ -189,13 +191,14 @@ class BasePipelineExecutor(object):
                 continue
 
             experiment_index.append(job_name)
-            logging.info('Creating directory: {}'.format(job_name))
+            logging.debug('Creating directory: {}'.format(job_name))
             self.make_dir(str(job_name))
 
             for job_name, script in zip(job_steps, scripts):
                 job_steps[job_name].append(script)
 
         self.has_experiment_dirs = True
+        logging.info('Executing pipeline.')
         self.run_jobs(job_steps, experiment_index, env_variables, **kwargs)
 
         # Step into each work folder and collect pipeline results.
@@ -264,7 +267,7 @@ class BasePipelineExecutor(object):
         results = OrderedDict()
         for job_name in experiment_index:
             file_name = pipeline_collection['RESULTS_FILE']
-            logging.info('Reads pipeline results from {}'.format(file_name))
+            logging.debug('Reads pipeline results from {}'.format(file_name))
             contents = self.read_file_contents(file_name, directory=str(job_name))
             f_handle = StringIO(contents)
             current_results = pd.Series.from_csv(f_handle)
