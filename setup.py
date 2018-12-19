@@ -7,13 +7,16 @@ def readme():
 
 setup(
     name='doepipeline',
-    version='1.0',
+    version='1.0.1',
     description='Package for optimizing pipelines using DoE.',
     long_description=readme(),
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Scientific/Engineering'
     ],
     keywords='pipeline doe optimization',
