@@ -7,7 +7,7 @@ def readme():
 
 setup(
     name='doepipeline',
-    version='0.1',
+    version='1.0',
     description='Package for optimizing pipelines using DoE.',
     long_description=readme(),
     classifiers=[

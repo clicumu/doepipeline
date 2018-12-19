@@ -1,7 +1,7 @@
-DOEpipeline
+doepipeline
 ===========
 
-This is yet another pipeline package. What distinguishes `DOEpipeline` is
+This is yet another pipeline package. What distinguishes `doepipeline` is
 that it enables pipeline optimization using methodologies from statistical
 `Design of Experiments (DOE) <https://en.wikipedia.org/wiki/Design_of_experiments>`_
 
