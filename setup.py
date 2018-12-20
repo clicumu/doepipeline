@@ -28,7 +28,8 @@ setup(
     install_requires=[
         'pyyaml',
         'pandas',
-        'pyDOE2'
+        'pyDOE2',
+        'statsmodels'
     ],
     include_package_data=True,
     tests_require=[
