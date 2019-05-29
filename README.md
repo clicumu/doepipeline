@@ -11,7 +11,7 @@ that it enables pipeline optimization using methodologies from statistical
 
 
 # Quick start links
-Take a look at the usage documentation to getting started using doepipeline. Briefly, the following steps are needed to start using doepipeline.
+Take a look at the [wiki documentation](https://github.com/clicumu/doepipeline/wiki) to getting started using doepipeline. Briefly, the following steps are needed to start using doepipeline.
 
 1. [Install doepipeline](https://github.com/clicumu/doepipeline/wiki/Installation)
 2. [Create configuration file](https://github.com/clicumu/doepipeline/wiki/Configuration-file)
