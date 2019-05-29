@@ -11,9 +11,17 @@ that it enables pipeline optimization using methodologies from statistical
 
 
 # Quick start links
+Take a look at the usage documentation to getting started using doepipeline. Briefly, the following steps are needed to start using doepipeline.
+
 1. [Install doepipeline](https://github.com/clicumu/doepipeline/wiki/Installation)
 2. [Create configuration file](https://github.com/clicumu/doepipeline/wiki/Configuration-file)
 3. [Run optimization](https://github.com/clicumu/doepipeline/wiki/Usage)
+
+Four example cases (including data and configuration) are provided to as help getting started; 
+1) [de-novo genome assembly](https://github.com/clicumu/doepipeline/wiki/Case-1)
+2) [scaffolding of a fragmented genome assembly](https://github.com/clicumu/doepipeline/wiki/Case-2)
+3) [k-mer taxonomic classification of ONT MinION reads](https://github.com/clicumu/doepipeline/wiki/Case-3) 
+4) [genetic variant calling](https://github.com/clicumu/doepipeline/wiki/Case-4)
 
 
 # Cite
