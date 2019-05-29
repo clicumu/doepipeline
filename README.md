@@ -174,3 +174,18 @@ Special paths available are:
 * `BASEDIR`: Path to the root working-directory, i.e. `working_directory`.
 * `WORKDIR`: Path to the current iterations working-directory.
 * Other constants specified under `constants` written in capital letters.
+
+About this software
+===================
+
+doepipeline is implemented as a Python package. It is open source software made available
+under the [MIT license](LICENSE).
+
+If you experience any difficulties with this software, or you have suggestions, or want
+to contribute directly, you have the following options:
+
+- submit a bug report or feature request to the 
+  [issue tracker](https://github.com/clicumu/doepipeline/issues)
+- contribute directly to the source code through the 
+  [github](https://github.com/clicumu/doepipeline) repository. 'Pull requests' are
+  especially welcome.
