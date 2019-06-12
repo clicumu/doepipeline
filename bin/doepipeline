@@ -11,7 +11,7 @@ import pandas as pd
 
 from doepipeline.executor import LocalPipelineExecutor, SlurmPipelineExecutor
 from doepipeline.generator import PipelineGenerator
-
+from doepipeline  import __version__
 
 ## todo: recovery-flag.
 
@@ -129,7 +129,7 @@ def make_parser():
                         a previous run. IMPORTANT: You MUST run doepipeline with the exact same \
                         parameters and yaml-file as with the run you are trying to recover. \
                         There are no internal checks for this, so use at own discretion.')
-
+    parser.add_argument('-V', '--version', action='version', version="%(prog)s ("+__version__+")")
     # TODO: Flag for setting maximum number of threads when running in parallel mode. As of now, it will start all jobs irregardles of how many threads are available.
 
     return parser

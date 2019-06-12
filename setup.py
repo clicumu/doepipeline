@@ -1,5 +1,6 @@
 from setuptools import setup
 import os
+from doepipeline  import __version__
 
 def readme():
     with open('README.md') as f:
@@ -7,7 +8,7 @@ def readme():
 
 setup(
     name='doepipeline',
-    version='1.1.0',
+    version=__version__,
     description='Package for optimizing pipelines using DoE.',
     long_description=readme(),
     classifiers=[
