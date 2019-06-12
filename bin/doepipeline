@@ -140,10 +140,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     recovering = args.recover
 
-    if args.version:
-        print("{name}: version {version}".format(name=doepipeline,version=__version__))
-        exit()
-
     if args.debug:
         log_format = ('[%(filename)s:%(lineno)s - %(funcName)20s() ] '
                       '%(asctime)s %(message)s')
