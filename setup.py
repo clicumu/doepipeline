@@ -17,7 +17,8 @@ setup(
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
-        'Topic :: Scientific/Engineering'
+        'Topic :: Scientific/Engineering',
+        'Operating System :: OS Independent'
     ],
     keywords='pipeline doe optimization',
     url='https://github.com/clicumu/doepipeline',
