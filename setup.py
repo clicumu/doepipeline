@@ -11,6 +11,7 @@ setup(
     version=__version__,
     description='Package for optimizing pipelines using DoE.',
     long_description=readme(),
+    long_description_content_type="text/markdown",
     classifiers=[
         'Development Status :: 4 - Beta',
         'License :: OSI Approved :: MIT License',
