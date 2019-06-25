@@ -1,6 +1,8 @@
 # *doepipeline*
 
-This is yet another pipeline package. What distinguishes `doepipeline` is that it enables pipeline optimization using methodologies from statistical [Design of Experiments (DoE)](https://en.wikipedia.org/wiki/Design_of_experiments).
+Optimize your data processing pipelines with *doepipeline*. The optimization strategy implemented in *doepipeline* is based on methods from statistical [Design of Experiments (DoE)](https://en.wikipedia.org/wiki/Design_of_experiments). Use it to optimize quantitative and/or qualitative factors of simple (single tool) or complex (multiple tool) pipelines.
+
+![doepipeline overview](https://github.com/clicumu/doepipeline/blob/master/supporting/doepipeline_overview.png)
 
 # Features
 * Community developed: Users are welcome to contribute to add additional functionality.
